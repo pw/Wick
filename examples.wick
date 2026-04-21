@@ -1,0 +1,50 @@
+;; examples.wick — a short tour of wick.
+
+;; --- basic recursion ---
+(def fact (fn (n) (if (<= n 1) 1 (* n (fact (- n 1))))))
+(print "10! =" (fact 10))
+
+;; --- fibonacci (slow, but shows recursion works) ---
+(def fib (fn (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))
+(print "fib 20 =" (fib 20))
+
+;; --- closures: counter that remembers its own state ---
+(def make-counter
+  (fn ()
+    (let ((n 0))
+      (fn ()
+        (set! n (+ n 1))
+        n))))
+
+(def c (make-counter))
+(print "counter:" (c) (c) (c) (c))
+
+;; --- higher-order functions from the stdlib ---
+(print "squares of 1..5 =" (map (fn (x) (* x x)) (list 1 2 3 4 5)))
+(print "evens of 1..10  =" (filter (fn (x) (= (mod x 2) 0)) (range 11)))
+(print "sum of 0..100   =" (sum (range 101)))
+
+;; --- cond ---
+(def sign (fn (n)
+  (cond
+    ((< n 0) "negative")
+    ((= n 0) "zero")
+    (else    "positive"))))
+
+(print "signs:" (sign -3) (sign 0) (sign 42))
+
+;; --- tail-call optimization: this would blow a normal recursive stack ---
+(def count-down (fn (n) (if (= n 0) "done" (count-down (- n 1)))))
+(print "count-down 100000 =" (count-down 100000))
+
+;; --- compose functions ---
+(def compose (fn (f g) (fn (x) (f (g x)))))
+(def inc (fn (x) (+ x 1)))
+(def dbl (fn (x) (* x 2)))
+(print "(inc . dbl) 5 =" ((compose inc dbl) 5))
+
+;; --- everything is expressions ---
+(def answer
+  (let ((xs (range 10)))
+    (sum (map (fn (x) (* x x)) xs))))
+(print "sum of squares 0..9 =" answer)
