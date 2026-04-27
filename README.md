@@ -36,6 +36,7 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - **Immutable dicts**: `dict dict-get dict-set dict-del dict-has? dict-keys dict-values dict-size dict?` — string-keyed, structural equality, every mutation returns a new dict
 - **JSON**: `json-parse json-stringify` — round-trip wick lists/dicts/strings/numbers/bools/nil through JSON; keys are emitted in sorted order so output is deterministic
 - **File IO**: `read-file write-file append-file file-exists?` — enough to script real things from disk
+- **HTTP**: `http-get url` — returns `(dict "status" 200 "body" "...")` on response, `nil` on network error; closes the loop with `json-parse` so wick can fetch the world and pick fields out
 - Standard library written in wick itself: `map filter fold reverse range length sum product take drop nth last append inc dec zero? positive? negative? even? odd? abs min max member? sort`
 - REPL with multi-line input, string-aware paren balancing, comment handling
 - File execution mode

@@ -14,6 +14,7 @@
 //             dict-size dict?
 //             json-parse json-stringify
 //             read-file write-file append-file file-exists?
+//             http-get
 // Stdlib (written in wick): map filter fold reverse range length sum product
 //             take nth drop last append inc dec zero? positive? negative? even? odd?
 //             abs min max member? sort
@@ -28,10 +29,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ---------- Values ----------
@@ -1211,6 +1214,36 @@ func defaultEnv() *Env {
 		}
 		_, err := os.Stat(string(path))
 		return Bool(err == nil), nil
+	}})
+
+	// ---------- HTTP ----------
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	env.Set("http-get", &Builtin{name: "http-get", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("http-get: need 1 arg (url)")
+		}
+		url, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("http-get: need string url, got %s", args[0])
+		}
+		req, err := http.NewRequest("GET", string(url), nil)
+		if err != nil {
+			return Nil{}, nil
+		}
+		req.Header.Set("User-Agent", "wick/0.1")
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return Nil{}, nil
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return Nil{}, nil
+		}
+		return &Dict{m: map[string]Value{
+			"status": Num(resp.StatusCode),
+			"body":   Str(string(body)),
+		}}, nil
 	}})
 
 	return env

@@ -101,3 +101,9 @@
 (print "first word:" (substring "hello world" 0 5))
 (print "shout:" (string-upcase "claude"))
 (print "trim+downcase:" (string-downcase (string-trim "   PATRICK   ")))
+
+;; --- http + json: fetch the world, parse it, pick a field out ---
+(def resp (http-get "https://httpbin.org/json"))
+(if (= (dict-get resp "status") 200)
+  (print "fetched title:" (dict-get (dict-get (json-parse (dict-get resp "body")) "slideshow") "title"))
+  (print "fetch failed, status:" (dict-get resp "status")))
