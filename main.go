@@ -654,6 +654,89 @@ func defaultEnv() *Env {
 		fmt.Println()
 		return Nil{}, nil
 	}})
+	env.Set("apply", &Builtin{name: "apply", f: func(args []Value) (Value, error) {
+		if len(args) != 2 {
+			return nil, errors.New("apply: need 2 args (fn args-list)")
+		}
+		fn := args[0]
+		var callArgs []Value
+		switch a := args[1].(type) {
+		case List:
+			callArgs = []Value(a)
+		case Nil:
+			callArgs = nil
+		default:
+			return nil, errors.New("apply: second arg must be list")
+		}
+		switch f := fn.(type) {
+		case *Builtin:
+			return f.f(callArgs)
+		case *Fn:
+			if len(callArgs) != len(f.params) {
+				return nil, fmt.Errorf("arity: need %d, got %d", len(f.params), len(callArgs))
+			}
+			sub := NewEnv(f.env)
+			for i, p := range f.params {
+				sub.Set(p, callArgs[i])
+			}
+			var last Value = Nil{}
+			for _, b := range f.body {
+				r, err := Eval(b, sub)
+				if err != nil {
+					return nil, err
+				}
+				last = r
+			}
+			return last, nil
+		default:
+			return nil, fmt.Errorf("apply: not callable: %s", fn)
+		}
+	}})
+	env.Set("string-length", &Builtin{name: "string-length", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("string-length: need 1 arg")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string-length: need string, got %s", args[0])
+		}
+		return Num(len([]rune(string(s)))), nil
+	}})
+	env.Set("string-append", &Builtin{name: "string-append", f: func(args []Value) (Value, error) {
+		var b strings.Builder
+		for _, a := range args {
+			s, ok := a.(Str)
+			if !ok {
+				return nil, fmt.Errorf("string-append: need string, got %s", a)
+			}
+			b.WriteString(string(s))
+		}
+		return Str(b.String()), nil
+	}})
+	env.Set("number->string", &Builtin{name: "number->string", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("number->string: need 1 arg")
+		}
+		n, ok := args[0].(Num)
+		if !ok {
+			return nil, fmt.Errorf("number->string: need number, got %s", args[0])
+		}
+		return Str(n.String()), nil
+	}})
+	env.Set("string->number", &Builtin{name: "string->number", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("string->number: need 1 arg")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string->number: need string, got %s", args[0])
+		}
+		f, err := strconv.ParseFloat(strings.TrimSpace(string(s)), 64)
+		if err != nil {
+			return Nil{}, nil
+		}
+		return Num(f), nil
+	}})
 	return env
 }
 
@@ -725,6 +808,45 @@ const stdlib = `
 
 (def nth (fn (n xs)
   (if (= n 0) (car xs) (nth (- n 1) (cdr xs)))))
+
+(def drop (fn (n xs)
+  (if (or (= n 0) (null? xs)) xs
+      (drop (- n 1) (cdr xs)))))
+
+(def last (fn (xs)
+  (if (null? (cdr xs)) (car xs) (last (cdr xs)))))
+
+(def append (fn (xs ys)
+  (if (null? xs) ys
+      (cons (car xs) (append (cdr xs) ys)))))
+
+(def inc (fn (n) (+ n 1)))
+(def dec (fn (n) (- n 1)))
+(def zero?     (fn (n) (= n 0)))
+(def positive? (fn (n) (> n 0)))
+(def negative? (fn (n) (< n 0)))
+(def even? (fn (n) (= (mod n 2) 0)))
+(def odd?  (fn (n) (= (mod n 2) 1)))
+
+(def abs (fn (n) (if (< n 0) (- 0 n) n)))
+
+(def min (fn (xs)
+  (fold (fn (a b) (if (< a b) a b)) (car xs) (cdr xs))))
+(def max (fn (xs)
+  (fold (fn (a b) (if (> a b) a b)) (car xs) (cdr xs))))
+
+(def member? (fn (x xs)
+  (if (null? xs) #f
+      (if (eq? x (car xs)) #t (member? x (cdr xs))))))
+
+(def sort (fn (cmp xs)
+  (if (or (null? xs) (null? (cdr xs))) xs
+      (let ((pivot (car xs))
+            (rest  (cdr xs)))
+        (append
+          (sort cmp (filter (fn (y) (cmp y pivot)) rest))
+          (cons pivot
+            (sort cmp (filter (fn (y) (not (cmp y pivot))) rest))))))))
 `
 
 // ---------- REPL ----------

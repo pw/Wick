@@ -31,8 +31,8 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - First-class functions and closures with lexical scope
 - **Tail-call optimization** — `(count-down 100000)` runs without blowing the stack
 - Special forms: `quote ' if cond def set! fn let begin and or`
-- Built-in primitives: arithmetic and comparison, `cons car cdr list null? pair? eq? not print display newline mod`
-- Standard library written in wick itself: `map filter fold reverse range length sum product take nth`
+- Built-in primitives: arithmetic and comparison, `cons car cdr list null? pair? eq? not apply print display newline mod string-length string-append number->string string->number`
+- Standard library written in wick itself: `map filter fold reverse range length sum product take drop nth last append inc dec zero? positive? negative? even? odd? abs min max member? sort`
 - REPL with multi-line input, string-aware paren balancing, comment handling
 - File execution mode
 
