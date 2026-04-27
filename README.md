@@ -27,11 +27,13 @@ in any Go program by copy-paste, does exactly what it says and no more.
 
 ## Features
 
-- Numbers, strings, booleans, symbols, lists, `nil`
+- Numbers, strings, booleans, symbols, lists, dicts, `nil`
 - First-class functions and closures with lexical scope
 - **Tail-call optimization** — `(count-down 100000)` runs without blowing the stack
 - Special forms: `quote ' if cond def set! fn let begin and or`
 - Built-in primitives: arithmetic and comparison, `cons car cdr list null? pair? eq? not apply print display newline mod string-length string-append number->string string->number`
+- **Immutable dicts**: `dict dict-get dict-set dict-del dict-has? dict-keys dict-values dict-size dict?` — string-keyed, structural equality, every mutation returns a new dict
+- **File IO**: `read-file write-file append-file file-exists?` — enough to script real things from disk
 - Standard library written in wick itself: `map filter fold reverse range length sum product take drop nth last append inc dec zero? positive? negative? even? odd? abs min max member? sort`
 - REPL with multi-line input, string-aware paren balancing, comment handling
 - File execution mode

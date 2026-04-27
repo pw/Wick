@@ -8,6 +8,9 @@
 // Primitives: arithmetic, comparison, cons car cdr list null? pair? eq? not
 //             apply mod string-length string-append number->string string->number
 //             print display newline
+//             dict dict-get dict-set dict-del dict-has? dict-keys dict-values
+//             dict-size dict?
+//             read-file write-file append-file file-exists?
 // Stdlib (written in wick): map filter fold reverse range length sum product
 //             take nth drop last append inc dec zero? positive? negative? even? odd?
 //             abs min max member? sort
@@ -22,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -59,6 +63,34 @@ func (l List) String() string {
 		parts[i] = v.String()
 	}
 	return "(" + strings.Join(parts, " ") + ")"
+}
+
+type Dict struct {
+	m map[string]Value
+}
+
+func (d *Dict) String() string {
+	keys := make([]string, 0, len(d.m))
+	for k := range d.m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys)*2+1)
+	parts = append(parts, "dict")
+	for _, k := range keys {
+		parts = append(parts, strconv.Quote(k), d.m[k].String())
+	}
+	return "(" + strings.Join(parts, " ") + ")"
+}
+
+func dictKey(v Value) (string, error) {
+	switch x := v.(type) {
+	case Str:
+		return string(x), nil
+	case Sym:
+		return string(x), nil
+	}
+	return "", fmt.Errorf("dict key must be string or symbol, got %s", v)
 }
 
 type Fn struct {
@@ -246,7 +278,7 @@ func ParseAll(src string) ([]Value, error) {
 func Eval(v Value, env *Env) (Value, error) {
 	for {
 		switch x := v.(type) {
-		case Num, Str, Bool, Nil, *Fn, *Builtin:
+		case Num, Str, Bool, Nil, *Fn, *Builtin, *Dict:
 			return x, nil
 		case Sym:
 			return env.Lookup(x)
@@ -740,6 +772,218 @@ func defaultEnv() *Env {
 		}
 		return Num(f), nil
 	}})
+
+	// ---------- Dicts ----------
+	env.Set("dict", &Builtin{name: "dict", f: func(args []Value) (Value, error) {
+		if len(args)%2 != 0 {
+			return nil, errors.New("dict: need even number of args (key value pairs)")
+		}
+		m := make(map[string]Value, len(args)/2)
+		for i := 0; i < len(args); i += 2 {
+			k, err := dictKey(args[i])
+			if err != nil {
+				return nil, err
+			}
+			m[k] = args[i+1]
+		}
+		return &Dict{m: m}, nil
+	}})
+	env.Set("dict?", &Builtin{name: "dict?", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("dict?: need 1 arg")
+		}
+		_, ok := args[0].(*Dict)
+		return Bool(ok), nil
+	}})
+	env.Set("dict-get", &Builtin{name: "dict-get", f: func(args []Value) (Value, error) {
+		if len(args) < 2 || len(args) > 3 {
+			return nil, errors.New("dict-get: need 2 or 3 args (dict key [default])")
+		}
+		d, ok := args[0].(*Dict)
+		if !ok {
+			return nil, fmt.Errorf("dict-get: need dict, got %s", args[0])
+		}
+		k, err := dictKey(args[1])
+		if err != nil {
+			return nil, err
+		}
+		if v, ok := d.m[k]; ok {
+			return v, nil
+		}
+		if len(args) == 3 {
+			return args[2], nil
+		}
+		return Nil{}, nil
+	}})
+	env.Set("dict-set", &Builtin{name: "dict-set", f: func(args []Value) (Value, error) {
+		if len(args) != 3 {
+			return nil, errors.New("dict-set: need 3 args (dict key value)")
+		}
+		d, ok := args[0].(*Dict)
+		if !ok {
+			return nil, fmt.Errorf("dict-set: need dict, got %s", args[0])
+		}
+		k, err := dictKey(args[1])
+		if err != nil {
+			return nil, err
+		}
+		m := make(map[string]Value, len(d.m)+1)
+		for kk, vv := range d.m {
+			m[kk] = vv
+		}
+		m[k] = args[2]
+		return &Dict{m: m}, nil
+	}})
+	env.Set("dict-del", &Builtin{name: "dict-del", f: func(args []Value) (Value, error) {
+		if len(args) != 2 {
+			return nil, errors.New("dict-del: need 2 args (dict key)")
+		}
+		d, ok := args[0].(*Dict)
+		if !ok {
+			return nil, fmt.Errorf("dict-del: need dict, got %s", args[0])
+		}
+		k, err := dictKey(args[1])
+		if err != nil {
+			return nil, err
+		}
+		m := make(map[string]Value, len(d.m))
+		for kk, vv := range d.m {
+			if kk != k {
+				m[kk] = vv
+			}
+		}
+		return &Dict{m: m}, nil
+	}})
+	env.Set("dict-has?", &Builtin{name: "dict-has?", f: func(args []Value) (Value, error) {
+		if len(args) != 2 {
+			return nil, errors.New("dict-has?: need 2 args (dict key)")
+		}
+		d, ok := args[0].(*Dict)
+		if !ok {
+			return nil, fmt.Errorf("dict-has?: need dict, got %s", args[0])
+		}
+		k, err := dictKey(args[1])
+		if err != nil {
+			return nil, err
+		}
+		_, ok = d.m[k]
+		return Bool(ok), nil
+	}})
+	env.Set("dict-keys", &Builtin{name: "dict-keys", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("dict-keys: need 1 arg")
+		}
+		d, ok := args[0].(*Dict)
+		if !ok {
+			return nil, fmt.Errorf("dict-keys: need dict, got %s", args[0])
+		}
+		keys := make([]string, 0, len(d.m))
+		for k := range d.m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		out := make(List, len(keys))
+		for i, k := range keys {
+			out[i] = Str(k)
+		}
+		return out, nil
+	}})
+	env.Set("dict-values", &Builtin{name: "dict-values", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("dict-values: need 1 arg")
+		}
+		d, ok := args[0].(*Dict)
+		if !ok {
+			return nil, fmt.Errorf("dict-values: need dict, got %s", args[0])
+		}
+		keys := make([]string, 0, len(d.m))
+		for k := range d.m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		out := make(List, len(keys))
+		for i, k := range keys {
+			out[i] = d.m[k]
+		}
+		return out, nil
+	}})
+	env.Set("dict-size", &Builtin{name: "dict-size", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("dict-size: need 1 arg")
+		}
+		d, ok := args[0].(*Dict)
+		if !ok {
+			return nil, fmt.Errorf("dict-size: need dict, got %s", args[0])
+		}
+		return Num(len(d.m)), nil
+	}})
+
+	// ---------- File IO ----------
+	env.Set("read-file", &Builtin{name: "read-file", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("read-file: need 1 arg (path)")
+		}
+		path, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("read-file: need string path, got %s", args[0])
+		}
+		data, err := os.ReadFile(string(path))
+		if err != nil {
+			return Nil{}, nil
+		}
+		return Str(string(data)), nil
+	}})
+	env.Set("write-file", &Builtin{name: "write-file", f: func(args []Value) (Value, error) {
+		if len(args) != 2 {
+			return nil, errors.New("write-file: need 2 args (path content)")
+		}
+		path, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("write-file: need string path, got %s", args[0])
+		}
+		content, ok := args[1].(Str)
+		if !ok {
+			return nil, fmt.Errorf("write-file: need string content, got %s", args[1])
+		}
+		if err := os.WriteFile(string(path), []byte(content), 0644); err != nil {
+			return Nil{}, nil
+		}
+		return Bool(true), nil
+	}})
+	env.Set("append-file", &Builtin{name: "append-file", f: func(args []Value) (Value, error) {
+		if len(args) != 2 {
+			return nil, errors.New("append-file: need 2 args (path content)")
+		}
+		path, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("append-file: need string path, got %s", args[0])
+		}
+		content, ok := args[1].(Str)
+		if !ok {
+			return nil, fmt.Errorf("append-file: need string content, got %s", args[1])
+		}
+		f, err := os.OpenFile(string(path), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return Nil{}, nil
+		}
+		defer f.Close()
+		if _, err := f.WriteString(string(content)); err != nil {
+			return Nil{}, nil
+		}
+		return Bool(true), nil
+	}})
+	env.Set("file-exists?", &Builtin{name: "file-exists?", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("file-exists?: need 1 arg (path)")
+		}
+		path, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("file-exists?: need string path, got %s", args[0])
+		}
+		_, err := os.Stat(string(path))
+		return Bool(err == nil), nil
+	}})
+
 	return env
 }
 
@@ -767,6 +1011,18 @@ func equals(a, b Value) bool {
 		}
 		for i := range x {
 			if !equals(x[i], y[i]) {
+				return false
+			}
+		}
+		return true
+	case *Dict:
+		y, ok := b.(*Dict)
+		if !ok || len(x.m) != len(y.m) {
+			return false
+		}
+		for k, v := range x.m {
+			yv, ok := y.m[k]
+			if !ok || !equals(v, yv) {
 				return false
 			}
 		}

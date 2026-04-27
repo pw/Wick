@@ -69,3 +69,20 @@
 
 (print "fizzbuzz 1..15:")
 (map (fn (n) (print " " (fizzbuzz n))) (map inc (range 15)))
+
+;; --- dicts: immutable, string-keyed maps ---
+(def patrick (dict "name" "Patrick" "tool" "wick" "version" "0.2"))
+(print "name:" (dict-get patrick "name"))
+(print "missing:" (dict-get patrick "title" "(unset)"))
+(def with-title (dict-set patrick "title" "builder"))
+(print "keys after set:" (dict-keys with-title))
+(print "original unchanged:" (dict-keys patrick))
+
+;; --- file IO: a small persistent counter ---
+(def counter-file "/tmp/wick-counter.txt")
+(def current
+  (let ((raw (read-file counter-file)))
+    (if (null? raw) 0 (string->number raw))))
+(def next (inc current))
+(write-file counter-file (number->string next))
+(print "runs so far:" next)
