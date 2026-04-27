@@ -7,6 +7,8 @@
 // Special forms: quote ' if cond def set! fn let begin and or
 // Primitives: arithmetic, comparison, cons car cdr list null? pair? eq? not
 //             apply mod string-length string-append number->string string->number
+//             string-contains? string-split string-replace substring
+//             string-upcase string-downcase string-trim
 //             print display newline
 //             dict dict-get dict-set dict-del dict-has? dict-keys dict-values
 //             dict-size dict?
@@ -849,6 +851,123 @@ func defaultEnv() *Env {
 			return Nil{}, nil
 		}
 		return Num(f), nil
+	}})
+	env.Set("string-contains?", &Builtin{name: "string-contains?", f: func(args []Value) (Value, error) {
+		if len(args) != 2 {
+			return nil, errors.New("string-contains?: need 2 args (haystack needle)")
+		}
+		hay, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string-contains?: need string, got %s", args[0])
+		}
+		needle, ok := args[1].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string-contains?: need string, got %s", args[1])
+		}
+		return Bool(strings.Contains(string(hay), string(needle))), nil
+	}})
+	env.Set("string-split", &Builtin{name: "string-split", f: func(args []Value) (Value, error) {
+		if len(args) != 2 {
+			return nil, errors.New("string-split: need 2 args (string delimiter)")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string-split: need string, got %s", args[0])
+		}
+		delim, ok := args[1].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string-split: need string, got %s", args[1])
+		}
+		parts := strings.Split(string(s), string(delim))
+		out := make(List, len(parts))
+		for i, p := range parts {
+			out[i] = Str(p)
+		}
+		return out, nil
+	}})
+	env.Set("string-replace", &Builtin{name: "string-replace", f: func(args []Value) (Value, error) {
+		if len(args) != 3 {
+			return nil, errors.New("string-replace: need 3 args (string old new)")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string-replace: need string, got %s", args[0])
+		}
+		old, ok := args[1].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string-replace: need string, got %s", args[1])
+		}
+		new_, ok := args[2].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string-replace: need string, got %s", args[2])
+		}
+		return Str(strings.ReplaceAll(string(s), string(old), string(new_))), nil
+	}})
+	env.Set("substring", &Builtin{name: "substring", f: func(args []Value) (Value, error) {
+		if len(args) != 2 && len(args) != 3 {
+			return nil, errors.New("substring: need 2 or 3 args (string start [end])")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("substring: need string, got %s", args[0])
+		}
+		start, ok := args[1].(Num)
+		if !ok {
+			return nil, fmt.Errorf("substring: need number for start, got %s", args[1])
+		}
+		runes := []rune(string(s))
+		startIdx := int(start)
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		if startIdx > len(runes) {
+			startIdx = len(runes)
+		}
+		endIdx := len(runes)
+		if len(args) == 3 {
+			end, ok := args[2].(Num)
+			if !ok {
+				return nil, fmt.Errorf("substring: need number for end, got %s", args[2])
+			}
+			endIdx = int(end)
+			if endIdx < startIdx {
+				endIdx = startIdx
+			}
+			if endIdx > len(runes) {
+				endIdx = len(runes)
+			}
+		}
+		return Str(string(runes[startIdx:endIdx])), nil
+	}})
+	env.Set("string-upcase", &Builtin{name: "string-upcase", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("string-upcase: need 1 arg")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string-upcase: need string, got %s", args[0])
+		}
+		return Str(strings.ToUpper(string(s))), nil
+	}})
+	env.Set("string-downcase", &Builtin{name: "string-downcase", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("string-downcase: need 1 arg")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string-downcase: need string, got %s", args[0])
+		}
+		return Str(strings.ToLower(string(s))), nil
+	}})
+	env.Set("string-trim", &Builtin{name: "string-trim", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("string-trim: need 1 arg")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("string-trim: need string, got %s", args[0])
+		}
+		return Str(strings.TrimSpace(string(s))), nil
 	}})
 
 	// ---------- Dicts ----------

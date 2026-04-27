@@ -93,3 +93,11 @@
 (def next (inc current))
 (write-file counter-file (number->string next))
 (print "runs so far:" next)
+
+;; --- string ops: enough to actually process text ---
+(print "contains 'wick':" (string-contains? "made of wick" "wick"))
+(print "csv split:" (string-split "go,ruby,wick" ","))
+(print "redact:" (string-replace "hello world hello" "hello" "***"))
+(print "first word:" (substring "hello world" 0 5))
+(print "shout:" (string-upcase "claude"))
+(print "trim+downcase:" (string-downcase (string-trim "   PATRICK   ")))
