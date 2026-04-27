@@ -58,3 +58,14 @@
 (print "sorted:" (sort < xs))
 (print "min/max:" (min xs) (max xs))
 (print "has 7?" (member? 7 xs) "has 9?" (member? 9 xs))
+
+;; --- fizzbuzz: cond + mod + number->string ---
+(def fizzbuzz (fn (n)
+  (cond
+    ((= (mod n 15) 0) "FizzBuzz")
+    ((= (mod n 3)  0) "Fizz")
+    ((= (mod n 5)  0) "Buzz")
+    (else             (number->string n)))))
+
+(print "fizzbuzz 1..15:")
+(map (fn (n) (print " " (fizzbuzz n))) (map inc (range 15)))

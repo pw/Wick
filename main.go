@@ -6,8 +6,11 @@
 //
 // Special forms: quote ' if cond def set! fn let begin and or
 // Primitives: arithmetic, comparison, cons car cdr list null? pair? eq? not
+//             apply mod string-length string-append number->string string->number
 //             print display newline
 // Stdlib (written in wick): map filter fold reverse range length sum product
+//             take nth drop last append inc dec zero? positive? negative? even? odd?
+//             abs min max member? sort
 //
 // Run: `wick` for REPL, `wick file.wick` to execute a file.
 
