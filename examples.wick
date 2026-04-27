@@ -78,6 +78,13 @@
 (print "keys after set:" (dict-keys with-title))
 (print "original unchanged:" (dict-keys patrick))
 
+;; --- json: round-trip lists and dicts through JSON ---
+(def doc (dict "name" "wick" "version" "0.3" "tags" (list "tiny" "lisp")))
+(def encoded (json-stringify doc))
+(print "json:" encoded)
+(def decoded (json-parse encoded))
+(print "tags from parsed:" (dict-get decoded "tags"))
+
 ;; --- file IO: a small persistent counter ---
 (def counter-file "/tmp/wick-counter.txt")
 (def current

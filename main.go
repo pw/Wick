@@ -10,6 +10,7 @@
 //             print display newline
 //             dict dict-get dict-set dict-del dict-has? dict-keys dict-values
 //             dict-size dict?
+//             json-parse json-stringify
 //             read-file write-file append-file file-exists?
 // Stdlib (written in wick): map filter fold reverse range length sum product
 //             take nth drop last append inc dec zero? positive? negative? even? odd?
@@ -21,6 +22,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -515,6 +517,82 @@ func truthy(v Value) bool {
 	}
 }
 
+// ---------- JSON conversion ----------
+
+func jsonToValue(v interface{}) (Value, error) {
+	switch x := v.(type) {
+	case nil:
+		return Nil{}, nil
+	case bool:
+		return Bool(x), nil
+	case json.Number:
+		f, err := x.Float64()
+		if err != nil {
+			return nil, fmt.Errorf("json-parse: bad number %s: %v", x, err)
+		}
+		return Num(f), nil
+	case float64:
+		return Num(x), nil
+	case string:
+		return Str(x), nil
+	case []interface{}:
+		out := make(List, len(x))
+		for i, e := range x {
+			ev, err := jsonToValue(e)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = ev
+		}
+		return out, nil
+	case map[string]interface{}:
+		m := make(map[string]Value, len(x))
+		for k, e := range x {
+			ev, err := jsonToValue(e)
+			if err != nil {
+				return nil, err
+			}
+			m[k] = ev
+		}
+		return &Dict{m: m}, nil
+	}
+	return nil, fmt.Errorf("json-parse: unexpected JSON type %T", v)
+}
+
+func valueToJSON(v Value) (interface{}, error) {
+	switch x := v.(type) {
+	case Nil:
+		return nil, nil
+	case Bool:
+		return bool(x), nil
+	case Num:
+		return float64(x), nil
+	case Str:
+		return string(x), nil
+	case List:
+		out := make([]interface{}, len(x))
+		for i, e := range x {
+			r, err := valueToJSON(e)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = r
+		}
+		return out, nil
+	case *Dict:
+		m := make(map[string]interface{}, len(x.m))
+		for k, e := range x.m {
+			r, err := valueToJSON(e)
+			if err != nil {
+				return nil, err
+			}
+			m[k] = r
+		}
+		return m, nil
+	}
+	return nil, fmt.Errorf("json-stringify: cannot serialize %s", v)
+}
+
 // ---------- Primitives ----------
 
 func defaultEnv() *Env {
@@ -916,6 +994,38 @@ func defaultEnv() *Env {
 			return nil, fmt.Errorf("dict-size: need dict, got %s", args[0])
 		}
 		return Num(len(d.m)), nil
+	}})
+
+	// ---------- JSON ----------
+	env.Set("json-parse", &Builtin{name: "json-parse", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("json-parse: need 1 arg")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("json-parse: need string, got %s", args[0])
+		}
+		dec := json.NewDecoder(strings.NewReader(string(s)))
+		dec.UseNumber()
+		var raw interface{}
+		if err := dec.Decode(&raw); err != nil {
+			return nil, fmt.Errorf("json-parse: %v", err)
+		}
+		return jsonToValue(raw)
+	}})
+	env.Set("json-stringify", &Builtin{name: "json-stringify", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("json-stringify: need 1 arg")
+		}
+		raw, err := valueToJSON(args[0])
+		if err != nil {
+			return nil, err
+		}
+		b, err := json.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("json-stringify: %v", err)
+		}
+		return Str(string(b)), nil
 	}})
 
 	// ---------- File IO ----------
