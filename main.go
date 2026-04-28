@@ -9,6 +9,7 @@
 //             apply mod string-length string-append number->string string->number
 //             string-contains? string-split string-replace substring
 //             string-upcase string-downcase string-trim
+//             re-match? re-find re-find-all re-replace re-split
 //             print display newline
 //             dict dict-get dict-set dict-del dict-has? dict-keys dict-values
 //             dict-size dict?
@@ -32,6 +33,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1012,6 +1014,110 @@ func defaultEnv() *Env {
 			return nil, fmt.Errorf("string-trim: need string, got %s", args[0])
 		}
 		return Str(strings.TrimSpace(string(s))), nil
+	}})
+
+	// ---------- Regex ----------
+	// Patterns are Go's RE2 syntax. Data-first (string, pattern) to match the
+	// rest of the string family. Replacement strings use $1, $2, ... for
+	// captured groups (Go's regexp.ReplaceAllString convention).
+	reCompile := func(name string, p Value) (*regexp.Regexp, error) {
+		s, ok := p.(Str)
+		if !ok {
+			return nil, fmt.Errorf("%s: need string for pattern, got %s", name, p)
+		}
+		re, err := regexp.Compile(string(s))
+		if err != nil {
+			return nil, fmt.Errorf("%s: bad pattern %q: %v", name, string(s), err)
+		}
+		return re, nil
+	}
+	env.Set("re-match?", &Builtin{name: "re-match?", f: func(args []Value) (Value, error) {
+		if len(args) != 2 {
+			return nil, errors.New("re-match?: need 2 args (string pattern)")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("re-match?: need string, got %s", args[0])
+		}
+		re, err := reCompile("re-match?", args[1])
+		if err != nil {
+			return nil, err
+		}
+		return Bool(re.MatchString(string(s))), nil
+	}})
+	env.Set("re-find", &Builtin{name: "re-find", f: func(args []Value) (Value, error) {
+		if len(args) != 2 {
+			return nil, errors.New("re-find: need 2 args (string pattern)")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("re-find: need string, got %s", args[0])
+		}
+		re, err := reCompile("re-find", args[1])
+		if err != nil {
+			return nil, err
+		}
+		loc := re.FindStringIndex(string(s))
+		if loc == nil {
+			return Nil{}, nil
+		}
+		return Str(string(s)[loc[0]:loc[1]]), nil
+	}})
+	env.Set("re-find-all", &Builtin{name: "re-find-all", f: func(args []Value) (Value, error) {
+		if len(args) != 2 {
+			return nil, errors.New("re-find-all: need 2 args (string pattern)")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("re-find-all: need string, got %s", args[0])
+		}
+		re, err := reCompile("re-find-all", args[1])
+		if err != nil {
+			return nil, err
+		}
+		matches := re.FindAllString(string(s), -1)
+		out := make(List, len(matches))
+		for i, m := range matches {
+			out[i] = Str(m)
+		}
+		return out, nil
+	}})
+	env.Set("re-replace", &Builtin{name: "re-replace", f: func(args []Value) (Value, error) {
+		if len(args) != 3 {
+			return nil, errors.New("re-replace: need 3 args (string pattern replacement)")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("re-replace: need string, got %s", args[0])
+		}
+		re, err := reCompile("re-replace", args[1])
+		if err != nil {
+			return nil, err
+		}
+		repl, ok := args[2].(Str)
+		if !ok {
+			return nil, fmt.Errorf("re-replace: need string for replacement, got %s", args[2])
+		}
+		return Str(re.ReplaceAllString(string(s), string(repl))), nil
+	}})
+	env.Set("re-split", &Builtin{name: "re-split", f: func(args []Value) (Value, error) {
+		if len(args) != 2 {
+			return nil, errors.New("re-split: need 2 args (string pattern)")
+		}
+		s, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("re-split: need string, got %s", args[0])
+		}
+		re, err := reCompile("re-split", args[1])
+		if err != nil {
+			return nil, err
+		}
+		parts := re.Split(string(s), -1)
+		out := make(List, len(parts))
+		for i, p := range parts {
+			out[i] = Str(p)
+		}
+		return out, nil
 	}})
 
 	// ---------- Dicts ----------

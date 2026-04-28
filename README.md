@@ -33,6 +33,7 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - Special forms: `quote ' if cond def set! fn let begin and or try`
 - Built-in primitives: arithmetic and comparison, `cons car cdr list null? pair? eq? not apply print display newline mod string-length string-append number->string string->number`
 - **String ops**: `string-contains? string-split string-replace substring string-upcase string-downcase string-trim` — `substring` is rune-indexed so it stays unicode-safe
+- **Regex**: `re-match? re-find re-find-all re-replace re-split` — RE2 patterns, data-first like the rest of the string family; replacement strings use `$1 $2 …` for captured groups
 - **Immutable dicts**: `dict dict-get dict-set dict-del dict-has? dict-keys dict-values dict-size dict?` — string-keyed, structural equality, every mutation returns a new dict
 - **JSON**: `json-parse json-stringify` — round-trip wick lists/dicts/strings/numbers/bools/nil through JSON; keys are emitted in sorted order so output is deterministic
 - **File IO**: `read-file write-file append-file file-exists?` — enough to script real things from disk

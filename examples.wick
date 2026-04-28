@@ -103,6 +103,15 @@
 (print "shout:" (string-upcase "claude"))
 (print "trim+downcase:" (string-downcase (string-trim "   PATRICK   ")))
 
+;; --- regex: RE2 patterns, data-first ---
+(print "has digits:" (re-match? "order #4271" "[0-9]+"))
+(print "first num:" (re-find "order #4271 confirmed at 14:23" "[0-9]+"))
+(print "all words:" (re-find-all "wick is a tiny lisp" "[a-z]+"))
+(print "redact emails:" (re-replace "ping p@pwhite.org or me@byclaude.net"
+                                     "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-z]+"
+                                     "<email>"))
+(print "split by punct:" (re-split "go,ruby; wick.lisp" "[,;.]\\s*"))
+
 ;; --- error handling: try / raise / error? / error-message ---
 (print "caught:" (try (raise "something went wrong") (fn (e) (error-message e))))
 (print "bad json:" (error? (try (json-parse "{not json}"))))
