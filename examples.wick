@@ -71,15 +71,21 @@
 (map (fn (n) (print " " (fizzbuzz n))) (map inc (range 15)))
 
 ;; --- dicts: immutable, string-keyed maps ---
-(def patrick (dict "name" "Patrick" "tool" "wick" "version" "0.2"))
+;; {k v ...} is sugar for (dict k v ...); [a b c] is sugar for (list a b c).
+(def patrick {"name" "Patrick" "tool" "wick" "version" "0.2"})
 (print "name:" (dict-get patrick "name"))
 (print "missing:" (dict-get patrick "title" "(unset)"))
 (def with-title (dict-set patrick "title" "builder"))
 (print "keys after set:" (dict-keys with-title))
 (print "original unchanged:" (dict-keys patrick))
 
+;; --- list literals: [a b c] desugars to (list a b c) ---
+(print "squares of [1 2 3]:" (map (fn (n) (* n n)) [1 2 3]))
+(def alice {"name" "Alice" "age" 30 "tags" ["admin" "user"]})
+(print "alice tags:" (dict-get alice "tags"))
+
 ;; --- json: round-trip lists and dicts through JSON ---
-(def doc (dict "name" "wick" "version" "0.3" "tags" (list "tiny" "lisp")))
+(def doc {"name" "wick" "version" "0.3" "tags" ["tiny" "lisp"]})
 (def encoded (json-stringify doc))
 (print "json:" encoded)
 (def decoded (json-parse encoded))

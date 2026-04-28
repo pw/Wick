@@ -85,12 +85,11 @@ func (d *Dict) String() string {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	parts := make([]string, 0, len(keys)*2+1)
-	parts = append(parts, "dict")
+	parts := make([]string, 0, len(keys)*2)
 	for _, k := range keys {
 		parts = append(parts, strconv.Quote(k), d.m[k].String())
 	}
-	return "(" + strings.Join(parts, " ") + ")"
+	return "{" + strings.Join(parts, " ") + "}"
 }
 
 func dictKey(v Value) (string, error) {
@@ -166,7 +165,7 @@ func tokenize(src string) []string {
 			for i < len(src) && src[i] != '\n' {
 				i++
 			}
-		case c == '(' || c == ')' || c == '\'':
+		case c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' || c == '\'':
 			toks = append(toks, string(c))
 			i++
 		case c == '"':
@@ -186,7 +185,7 @@ func tokenize(src string) []string {
 			i = j + 1
 		default:
 			j := i
-			for j < len(src) && !strings.ContainsRune(" \t\n\r()';\"", rune(src[j])) {
+			for j < len(src) && !strings.ContainsRune(" \t\n\r()[]{}';\"", rune(src[j])) {
 				j++
 			}
 			toks = append(toks, src[i:j])
@@ -240,6 +239,46 @@ func (r *reader) read() (Value, error) {
 		}
 	case ")":
 		return nil, errors.New("unexpected ')'")
+	case "[":
+		// [a b c] desugars to (list a b c). Empty [] is (list).
+		out := List{Sym("list")}
+		for {
+			tk, ok := r.peek()
+			if !ok {
+				return nil, errors.New("unclosed '['")
+			}
+			if tk == "]" {
+				r.next()
+				return out, nil
+			}
+			v, err := r.read()
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, v)
+		}
+	case "]":
+		return nil, errors.New("unexpected ']'")
+	case "{":
+		// {"k" v ...} desugars to (dict "k" v ...). Empty {} is (dict).
+		out := List{Sym("dict")}
+		for {
+			tk, ok := r.peek()
+			if !ok {
+				return nil, errors.New("unclosed '{'")
+			}
+			if tk == "}" {
+				r.next()
+				return out, nil
+			}
+			v, err := r.read()
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, v)
+		}
+	case "}":
+		return nil, errors.New("unexpected '}'")
 	case "'":
 		v, err := r.read()
 		if err != nil {
@@ -1595,10 +1634,10 @@ func repl(env *Env) {
 			if c == ';' {
 				break
 			}
-			if c == '(' {
+			if c == '(' || c == '[' || c == '{' {
 				depth++
 			}
-			if c == ')' {
+			if c == ')' || c == ']' || c == '}' {
 				depth--
 			}
 		}

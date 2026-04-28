@@ -31,6 +31,7 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - First-class functions and closures with lexical scope
 - **Tail-call optimization** — `(count-down 100000)` runs without blowing the stack
 - Special forms: `quote ' if cond def set! fn let begin and or try`
+- **Literal forms**: `[a b c]` is sugar for `(list a b c)`; `{"k" v ...}` is sugar for `(dict "k" v ...)`. Values are normal expressions and evaluate at runtime.
 - Built-in primitives: arithmetic and comparison, `cons car cdr list null? pair? eq? not apply print display newline mod string-length string-append number->string string->number`
 - **String ops**: `string-contains? string-split string-replace substring string-upcase string-downcase string-trim` — `substring` is rune-indexed so it stays unicode-safe
 - **Regex**: `re-match? re-find re-find-all re-replace re-split` — RE2 patterns, data-first like the rest of the string family; replacement strings use `$1 $2 …` for captured groups
