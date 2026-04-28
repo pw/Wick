@@ -1552,6 +1552,18 @@ const stdlib = `
   (if (or (= n 0) (null? xs)) xs
       (drop (- n 1) (cdr xs)))))
 
+(def take-while (fn (pred xs)
+  (if (null? xs) '()
+      (if (pred (car xs))
+          (cons (car xs) (take-while pred (cdr xs)))
+          '()))))
+
+(def drop-while (fn (pred xs)
+  (if (null? xs) '()
+      (if (pred (car xs))
+          (drop-while pred (cdr xs))
+          xs))))
+
 (def last (fn (xs)
   (if (null? (cdr xs)) (car xs) (last (cdr xs)))))
 
@@ -1577,6 +1589,21 @@ const stdlib = `
 (def member? (fn (x xs)
   (if (null? xs) #f
       (if (eq? x (car xs)) #t (member? x (cdr xs))))))
+
+(def find (fn (pred xs)
+  (if (null? xs) #f
+      (if (pred (car xs)) (car xs)
+          (find pred (cdr xs))))))
+
+(def any? (fn (pred xs)
+  (if (null? xs) #f
+      (if (pred (car xs)) #t
+          (any? pred (cdr xs))))))
+
+(def all? (fn (pred xs)
+  (if (null? xs) #t
+      (if (pred (car xs)) (all? pred (cdr xs))
+          #f))))
 
 (def sort (fn (cmp xs)
   (if (or (null? xs) (null? (cdr xs))) xs

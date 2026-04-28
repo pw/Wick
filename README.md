@@ -40,7 +40,7 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - **File IO**: `read-file write-file append-file file-exists?` — enough to script real things from disk
 - **HTTP**: `http-get url` — returns `(dict "status" 200 "body" "...")` on response, raises on network error so you can `try` it
 - **Errors**: `try`, `raise`, `error?`, `error-message` — `(try expr [handler])` catches anything raised inside `expr`; the value is an `(error "msg")` you can branch on
-- Standard library written in wick itself: `map filter fold reverse range length sum product take drop nth last append inc dec zero? positive? negative? even? odd? abs min max member? sort`
+- Standard library written in wick itself: `map filter fold reverse range length sum product take drop take-while drop-while nth last append inc dec zero? positive? negative? even? odd? abs min max member? find any? all? sort`
 - REPL with multi-line input, string-aware paren balancing, comment handling
 - File execution mode
 
