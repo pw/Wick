@@ -30,13 +30,14 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - Numbers, strings, booleans, symbols, lists, dicts, `nil`
 - First-class functions and closures with lexical scope
 - **Tail-call optimization** — `(count-down 100000)` runs without blowing the stack
-- Special forms: `quote ' if cond def set! fn let begin and or`
+- Special forms: `quote ' if cond def set! fn let begin and or try`
 - Built-in primitives: arithmetic and comparison, `cons car cdr list null? pair? eq? not apply print display newline mod string-length string-append number->string string->number`
 - **String ops**: `string-contains? string-split string-replace substring string-upcase string-downcase string-trim` — `substring` is rune-indexed so it stays unicode-safe
 - **Immutable dicts**: `dict dict-get dict-set dict-del dict-has? dict-keys dict-values dict-size dict?` — string-keyed, structural equality, every mutation returns a new dict
 - **JSON**: `json-parse json-stringify` — round-trip wick lists/dicts/strings/numbers/bools/nil through JSON; keys are emitted in sorted order so output is deterministic
 - **File IO**: `read-file write-file append-file file-exists?` — enough to script real things from disk
-- **HTTP**: `http-get url` — returns `(dict "status" 200 "body" "...")` on response, `nil` on network error; closes the loop with `json-parse` so wick can fetch the world and pick fields out
+- **HTTP**: `http-get url` — returns `(dict "status" 200 "body" "...")` on response, raises on network error so you can `try` it
+- **Errors**: `try`, `raise`, `error?`, `error-message` — `(try expr [handler])` catches anything raised inside `expr`; the value is an `(error "msg")` you can branch on
 - Standard library written in wick itself: `map filter fold reverse range length sum product take drop nth last append inc dec zero? positive? negative? even? odd? abs min max member? sort`
 - REPL with multi-line input, string-aware paren balancing, comment handling
 - File execution mode

@@ -88,8 +88,9 @@
 ;; --- file IO: a small persistent counter ---
 (def counter-file "/tmp/wick-counter.txt")
 (def current
-  (let ((raw (read-file counter-file)))
-    (if (null? raw) 0 (string->number raw))))
+  (if (file-exists? counter-file)
+      (string->number (read-file counter-file))
+      0))
 (def next (inc current))
 (write-file counter-file (number->string next))
 (print "runs so far:" next)
@@ -102,8 +103,18 @@
 (print "shout:" (string-upcase "claude"))
 (print "trim+downcase:" (string-downcase (string-trim "   PATRICK   ")))
 
+;; --- error handling: try / raise / error? / error-message ---
+(print "caught:" (try (raise "something went wrong") (fn (e) (error-message e))))
+(print "bad json:" (error? (try (json-parse "{not json}"))))
+(def safe-divide (fn (a b)
+  (if (= b 0) (raise "divide by zero") (/ a b))))
+(print "10/0 ->" (try (safe-divide 10 0) (fn (e) (error-message e))))
+(print "10/2 ->" (try (safe-divide 10 2)))
+
 ;; --- http + json: fetch the world, parse it, pick a field out ---
-(def resp (http-get "https://httpbin.org/json"))
+;; http-get raises on network error; try lets us recover with a default.
+(def resp (try (http-get "https://httpbin.org/json")
+               (fn (e) (dict "status" 0 "body" "" "error" (error-message e)))))
 (if (= (dict-get resp "status") 200)
   (print "fetched title:" (dict-get (dict-get (json-parse (dict-get resp "body")) "slideshow") "title"))
-  (print "fetch failed, status:" (dict-get resp "status")))
+  (print "fetch failed:" (dict-get resp "error" (number->string (dict-get resp "status")))))

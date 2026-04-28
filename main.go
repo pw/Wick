@@ -4,7 +4,7 @@
 // scope, recursion with tail-call optimization, quote / quasiquote-less quote,
 // and a small stdlib written in wick itself.
 //
-// Special forms: quote ' if cond def set! fn let begin and or
+// Special forms: quote ' if cond def set! fn let begin and or try
 // Primitives: arithmetic, comparison, cons car cdr list null? pair? eq? not
 //             apply mod string-length string-append number->string string->number
 //             string-contains? string-split string-replace substring
@@ -15,6 +15,7 @@
 //             json-parse json-stringify
 //             read-file write-file append-file file-exists?
 //             http-get
+//             error? error-message raise
 // Stdlib (written in wick): map filter fold reverse range length sum product
 //             take nth drop last append inc dec zero? positive? negative? even? odd?
 //             abs min max member? sort
@@ -114,6 +115,10 @@ type Builtin struct {
 }
 
 func (b *Builtin) String() string { return "#<builtin " + b.name + ">" }
+
+type Err struct{ msg string }
+
+func (e *Err) String() string { return "(error " + strconv.Quote(e.msg) + ")" }
 
 // ---------- Environment ----------
 
@@ -285,7 +290,7 @@ func ParseAll(src string) ([]Value, error) {
 func Eval(v Value, env *Env) (Value, error) {
 	for {
 		switch x := v.(type) {
-		case Num, Str, Bool, Nil, *Fn, *Builtin, *Dict:
+		case Num, Str, Bool, Nil, *Fn, *Builtin, *Dict, *Err:
 			return x, nil
 		case Sym:
 			return env.Lookup(x)
@@ -469,6 +474,42 @@ func Eval(v Value, env *Env) (Value, error) {
 						}
 					}
 					return Bool(false), nil
+				case "try":
+					if len(x) < 2 || len(x) > 3 {
+						return nil, errors.New("try: need 1 or 2 args (expr [handler])")
+					}
+					result, evalErr := Eval(x[1], env)
+					if evalErr == nil {
+						return result, nil
+					}
+					errVal := &Err{msg: evalErr.Error()}
+					if len(x) == 2 {
+						return errVal, nil
+					}
+					handler, herr := Eval(x[2], env)
+					if herr != nil {
+						return nil, herr
+					}
+					switch h := handler.(type) {
+					case *Builtin:
+						return h.f([]Value{errVal})
+					case *Fn:
+						if len(h.params) != 1 {
+							return nil, fmt.Errorf("try: handler must take 1 arg, got %d", len(h.params))
+						}
+						sub := NewEnv(h.env)
+						sub.Set(h.params[0], errVal)
+						for i := 0; i < len(h.body)-1; i++ {
+							if _, err := Eval(h.body[i], sub); err != nil {
+								return nil, err
+							}
+						}
+						v = h.body[len(h.body)-1]
+						env = sub
+						continue
+					default:
+						return nil, fmt.Errorf("try: handler not callable: %s", handler)
+					}
 				}
 			}
 			// function application
@@ -1161,7 +1202,7 @@ func defaultEnv() *Env {
 		}
 		data, err := os.ReadFile(string(path))
 		if err != nil {
-			return Nil{}, nil
+			return nil, fmt.Errorf("read-file: %v", err)
 		}
 		return Str(string(data)), nil
 	}})
@@ -1178,7 +1219,7 @@ func defaultEnv() *Env {
 			return nil, fmt.Errorf("write-file: need string content, got %s", args[1])
 		}
 		if err := os.WriteFile(string(path), []byte(content), 0644); err != nil {
-			return Nil{}, nil
+			return nil, fmt.Errorf("write-file: %v", err)
 		}
 		return Bool(true), nil
 	}})
@@ -1196,11 +1237,11 @@ func defaultEnv() *Env {
 		}
 		f, err := os.OpenFile(string(path), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			return Nil{}, nil
+			return nil, fmt.Errorf("append-file: %v", err)
 		}
 		defer f.Close()
 		if _, err := f.WriteString(string(content)); err != nil {
-			return Nil{}, nil
+			return nil, fmt.Errorf("append-file: %v", err)
 		}
 		return Bool(true), nil
 	}})
@@ -1228,22 +1269,51 @@ func defaultEnv() *Env {
 		}
 		req, err := http.NewRequest("GET", string(url), nil)
 		if err != nil {
-			return Nil{}, nil
+			return nil, fmt.Errorf("http-get: %v", err)
 		}
 		req.Header.Set("User-Agent", "wick/0.1")
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			return Nil{}, nil
+			return nil, fmt.Errorf("http-get: %v", err)
 		}
 		defer resp.Body.Close()
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return Nil{}, nil
+			return nil, fmt.Errorf("http-get: %v", err)
 		}
 		return &Dict{m: map[string]Value{
 			"status": Num(resp.StatusCode),
 			"body":   Str(string(body)),
 		}}, nil
+	}})
+
+	// ---------- Errors ----------
+	env.Set("error?", &Builtin{name: "error?", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("error?: need 1 arg")
+		}
+		_, ok := args[0].(*Err)
+		return Bool(ok), nil
+	}})
+	env.Set("error-message", &Builtin{name: "error-message", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("error-message: need 1 arg")
+		}
+		e, ok := args[0].(*Err)
+		if !ok {
+			return nil, fmt.Errorf("error-message: need error, got %s", args[0])
+		}
+		return Str(e.msg), nil
+	}})
+	env.Set("raise", &Builtin{name: "raise", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("raise: need 1 arg (message)")
+		}
+		msg, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("raise: need string, got %s", args[0])
+		}
+		return nil, errors.New(string(msg))
 	}})
 
 	return env
@@ -1289,6 +1359,9 @@ func equals(a, b Value) bool {
 			}
 		}
 		return true
+	case *Err:
+		y, ok := b.(*Err)
+		return ok && x.msg == y.msg
 	}
 	return false
 }
