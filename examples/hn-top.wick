@@ -1,0 +1,26 @@
+;; hn-top.wick — fetch the top 5 Hacker News stories.
+;; Two-step API: /topstories.json returns a list of IDs;
+;; /item/{id}.json returns the story. CLI-only.
+
+(def base "https://hacker-news.firebaseio.com/v0")
+
+(def get-json
+  (fn (url)
+    (let ((r (http-get url)))
+      (if (= (dict-get r "status") 200)
+          (json-parse (dict-get r "body"))
+          (raise (string-append "HTTP " (number->string (dict-get r "status"))))))))
+
+(def fetch-story
+  (fn (id)
+    (get-json (string-append base "/item/" (number->string id) ".json"))))
+
+(def ids (get-json (string-append base "/topstories.json")))
+
+(print "top 5 on hacker news:")
+(map (fn (id)
+       (let ((s (fetch-story id)))
+         (print " " (dict-get s "title")
+                "·" (dict-get s "score" 0) "pts"
+                "·" (dict-get s "by" "?"))))
+     (take 5 ids))

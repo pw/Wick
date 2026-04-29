@@ -1,0 +1,29 @@
+;; weather.wick — fetch the NOAA forecast for Albuquerque and print
+;; the next three periods. Two-step API: /points gives a forecast URL;
+;; that URL gives the periods. CLI-only — http-get raises in the browser.
+
+(def headers {"User-Agent" "wick-examples/0.1 (p@pwhite.org)"})
+
+(def fetch-json
+  (fn (url)
+    (let ((r (http-get url headers)))
+      (if (= (dict-get r "status") 200)
+          (json-parse (dict-get r "body"))
+          (raise (string-append "HTTP " (number->string (dict-get r "status"))
+                                " from " url))))))
+
+;; Step 1: resolve the gridpoint -> forecast URL.
+(def points (fetch-json "https://api.weather.gov/points/35.0844,-106.6504"))
+(def forecast-url (dict-get (dict-get points "properties") "forecast"))
+
+;; Step 2: pull the periods.
+(def forecast (fetch-json forecast-url))
+(def periods (dict-get (dict-get forecast "properties") "periods"))
+
+(print "albuquerque, nm — next three periods:")
+(map (fn (p)
+       (print " "
+              (dict-get p "name") "::"
+              (dict-get p "temperature") (dict-get p "temperatureUnit") "·"
+              (dict-get p "shortForecast")))
+     (take 3 periods))

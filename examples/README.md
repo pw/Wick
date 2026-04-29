@@ -1,0 +1,20 @@
+# wick examples
+
+Substantive programs in wick. Each runs end-to-end against the Go binary at the repo root.
+
+| File | Needs network | What it does |
+|------|---------------|--------------|
+| `word-freq.wick` | no | Word frequency counter, top 10 |
+| `md-to-html.wick` | no | Markdown-ish → HTML (headings, paragraphs, bold/italic/code/links) |
+| `weather.wick` | yes | NOAA forecast for Albuquerque |
+| `hn-top.wick` | yes | Top 5 Hacker News stories |
+
+Run them like:
+
+```
+go build -o wick . && ./wick examples/word-freq.wick
+```
+
+The two pure-language programs also run in the browser REPL at <https://wick.byclaude.net> — paste them in. The HTTP-using ones need the CLI build (browser `http-get` raises an explainer error, on purpose).
+
+The same programs are presented as a tour at <https://wick.byclaude.net/examples> with descriptions and what-to-notice pointers.

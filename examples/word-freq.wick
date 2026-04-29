@@ -1,0 +1,36 @@
+;; word-freq.wick — count word frequency in a passage; print the top 10.
+;; Pure language: no network, no file IO. Runs in the browser REPL.
+
+(def passage
+  "The fog comes on little cat feet. It sits looking over harbor and city
+   on silent haunches and then moves on. The fog is gentle. The fog is
+   patient. The fog is what the fog is.")
+
+;; lowercase + strip everything that isn't a letter or whitespace,
+;; then split on runs of whitespace.
+(def words
+  (filter (fn (w) (> (string-length w) 0))
+          (re-split (re-replace (string-downcase passage) "[^a-z\\s]" " ")
+                    "\\s+")))
+
+;; tally into a dict by walking the list.
+(def tally
+  (fn (xs counts)
+    (if (null? xs)
+        counts
+        (let ((w (car xs)))
+          (tally (cdr xs)
+                 (dict-set counts w (+ 1 (dict-get counts w 0))))))))
+
+(def counts (tally words {}))
+
+;; turn the dict into a list of [word count] pairs and sort by count desc.
+(def pairs
+  (map (fn (k) [k (dict-get counts k)]) (dict-keys counts)))
+
+(def sorted
+  (sort (fn (a b) (> (car (cdr a)) (car (cdr b)))) pairs))
+
+(print "top 10 words:")
+(map (fn (p) (print " " (car p) "->" (car (cdr p))))
+     (take 10 sorted))

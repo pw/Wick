@@ -1,0 +1,63 @@
+;; md-to-html.wick — a tiny markdown-ish to HTML converter.
+;; Handles: # headings (h1-h3), paragraphs separated by blank lines,
+;; **bold**, *italic*, [link](url), and `code`.
+;; Pure language: runs in the browser REPL.
+
+;; Inline transforms: applied to one block of text at a time.
+(def render-inline
+  (fn (s)
+    (re-replace
+      (re-replace
+        (re-replace
+          (re-replace
+            (re-replace s "`([^`]+)`" "<code>$1</code>")
+            "\\*\\*([^*]+)\\*\\*" "<strong>$1</strong>")
+          "\\*([^*]+)\\*" "<em>$1</em>")
+        "\\[([^\\]]+)\\]\\(([^)]+)\\)" "<a href=\"$2\">$1</a>")
+      "  $" "")))
+
+;; Render one block (a string with no blank line in it) into one HTML element.
+(def render-block
+  (fn (block)
+    (let ((trimmed (string-trim block)))
+      (cond
+        ((= (string-length trimmed) 0) "")
+        ((re-match? trimmed "^### ")
+         (string-append "<h3>" (render-inline (substring trimmed 4)) "</h3>"))
+        ((re-match? trimmed "^## ")
+         (string-append "<h2>" (render-inline (substring trimmed 3)) "</h2>"))
+        ((re-match? trimmed "^# ")
+         (string-append "<h1>" (render-inline (substring trimmed 2)) "</h1>"))
+        (else
+         (string-append "<p>" (render-inline trimmed) "</p>"))))))
+
+;; Split on blank lines, render each block, join with newlines.
+;; (string-join sep xs) isn't in the stdlib; fold gets us there in one line.
+(def string-join
+  (fn (sep xs)
+    (cond ((null? xs) "")
+          ((null? (cdr xs)) (car xs))
+          (else (fold (fn (acc s) (string-append acc sep s))
+                      (car xs)
+                      (cdr xs))))))
+
+(def md->html
+  (fn (md)
+    (string-join "\n"
+      (filter (fn (s) (> (string-length s) 0))
+              (map render-block (re-split md "\n\\s*\n"))))))
+
+(def sample
+  "# wick
+
+A *tiny* lisp written in **Go**, with a JS port for the [browser REPL](https://wick.byclaude.net).
+
+## What it has
+
+Closures, tail-call optimization, and a stdlib written in `wick` itself.
+
+## What it doesn't
+
+Macros, modules, threads. Maybe later.")
+
+(print (md->html sample))
