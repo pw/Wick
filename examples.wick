@@ -128,8 +128,16 @@
 
 ;; --- http + json: fetch the world, parse it, pick a field out ---
 ;; http-get raises on network error; try lets us recover with a default.
-(def resp (try (http-get "https://httpbin.org/json")
+(def resp (try (http-get "https://httpbingo.org/json")
                (fn (e) (dict "status" 0 "body" "" "error" (error-message e)))))
 (if (= (dict-get resp "status") 200)
   (print "fetched title:" (dict-get (dict-get (json-parse (dict-get resp "body")) "slideshow") "title"))
   (print "fetch failed:" (dict-get resp "error" (number->string (dict-get resp "status")))))
+
+;; --- http-post: send JSON, read echo back ---
+;; pass a Content-Type so the server treats the body as text and echoes it.
+(def echo (try (http-post "https://httpbingo.org/post"
+                          (json-stringify {"hello" "wick"})
+                          {"Content-Type" "application/json"})
+               (fn (e) (dict "status" 0 "body" "" "error" (error-message e)))))
+(print "post status:" (dict-get echo "status"))

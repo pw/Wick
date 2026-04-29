@@ -15,7 +15,7 @@
 //             dict-size dict?
 //             json-parse json-stringify
 //             read-file write-file append-file file-exists?
-//             http-get
+//             http-get http-post
 //             error? error-message raise
 // Stdlib (written in wick): map filter fold reverse range length sum product
 //             take nth drop last append inc dec zero? positive? negative? even? odd?
@@ -1404,9 +1404,38 @@ func defaultEnv() *Env {
 
 	// ---------- HTTP ----------
 	httpClient := &http.Client{Timeout: 10 * time.Second}
+	applyHeaders := func(req *http.Request, h Value, name string) error {
+		d, ok := h.(*Dict)
+		if !ok {
+			return fmt.Errorf("%s: headers must be a dict, got %s", name, h)
+		}
+		for k, v := range d.m {
+			s, ok := v.(Str)
+			if !ok {
+				return fmt.Errorf("%s: header value for %q must be a string, got %s", name, k, v)
+			}
+			req.Header.Set(k, string(s))
+		}
+		return nil
+	}
+	responseDict := func(resp *http.Response) (Value, error) {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		headers := &Dict{m: map[string]Value{}}
+		for k, vs := range resp.Header {
+			headers.m[k] = Str(strings.Join(vs, ", "))
+		}
+		return &Dict{m: map[string]Value{
+			"status":  Num(resp.StatusCode),
+			"body":    Str(string(body)),
+			"headers": headers,
+		}}, nil
+	}
 	env.Set("http-get", &Builtin{name: "http-get", f: func(args []Value) (Value, error) {
-		if len(args) != 1 {
-			return nil, errors.New("http-get: need 1 arg (url)")
+		if len(args) < 1 || len(args) > 2 {
+			return nil, errors.New("http-get: need 1 or 2 args (url [headers])")
 		}
 		url, ok := args[0].(Str)
 		if !ok {
@@ -1417,19 +1446,54 @@ func defaultEnv() *Env {
 			return nil, fmt.Errorf("http-get: %v", err)
 		}
 		req.Header.Set("User-Agent", "wick/0.1")
+		if len(args) == 2 {
+			if err := applyHeaders(req, args[1], "http-get"); err != nil {
+				return nil, err
+			}
+		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("http-get: %v", err)
 		}
 		defer resp.Body.Close()
-		body, err := io.ReadAll(resp.Body)
+		out, err := responseDict(resp)
 		if err != nil {
 			return nil, fmt.Errorf("http-get: %v", err)
 		}
-		return &Dict{m: map[string]Value{
-			"status": Num(resp.StatusCode),
-			"body":   Str(string(body)),
-		}}, nil
+		return out, nil
+	}})
+	env.Set("http-post", &Builtin{name: "http-post", f: func(args []Value) (Value, error) {
+		if len(args) < 2 || len(args) > 3 {
+			return nil, errors.New("http-post: need 2 or 3 args (url body [headers])")
+		}
+		url, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("http-post: need string url, got %s", args[0])
+		}
+		body, ok := args[1].(Str)
+		if !ok {
+			return nil, fmt.Errorf("http-post: need string body, got %s", args[1])
+		}
+		req, err := http.NewRequest("POST", string(url), strings.NewReader(string(body)))
+		if err != nil {
+			return nil, fmt.Errorf("http-post: %v", err)
+		}
+		req.Header.Set("User-Agent", "wick/0.1")
+		if len(args) == 3 {
+			if err := applyHeaders(req, args[2], "http-post"); err != nil {
+				return nil, err
+			}
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("http-post: %v", err)
+		}
+		defer resp.Body.Close()
+		out, err := responseDict(resp)
+		if err != nil {
+			return nil, fmt.Errorf("http-post: %v", err)
+		}
+		return out, nil
 	}})
 
 	// ---------- Errors ----------
