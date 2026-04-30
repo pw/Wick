@@ -8,6 +8,7 @@ Substantive programs in wick. Each runs end-to-end against the Go binary at the 
 | `md-to-html.wick` | no | Markdown-ish → HTML (headings, paragraphs, bold/italic/code/links) |
 | `weather.wick` | yes | NOAA forecast for Albuquerque |
 | `hn-top.wick` | yes | Top 5 Hacker News stories |
+| `bake.wick` | no | Static blog generator: walks `posts/`, emits `index.html` |
 
 Run them like:
 

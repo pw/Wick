@@ -1401,6 +1401,29 @@ func defaultEnv() *Env {
 		_, err := os.Stat(string(path))
 		return Bool(err == nil), nil
 	}})
+	env.Set("list-dir", &Builtin{name: "list-dir", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("list-dir: need 1 arg (path)")
+		}
+		path, ok := args[0].(Str)
+		if !ok {
+			return nil, fmt.Errorf("list-dir: need string path, got %s", args[0])
+		}
+		entries, err := os.ReadDir(string(path))
+		if err != nil {
+			return nil, fmt.Errorf("list-dir: %v", err)
+		}
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		sort.Strings(names)
+		out := make(List, len(names))
+		for i, n := range names {
+			out[i] = Str(n)
+		}
+		return out, nil
+	}})
 
 	// ---------- HTTP ----------
 	httpClient := &http.Client{Timeout: 10 * time.Second}

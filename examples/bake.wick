@@ -1,0 +1,71 @@
+;; bake.wick — minimal blog generator. Reads markdown files from posts/,
+;; emits one combined index.html with all posts inline, newest first.
+;; Posts are named YYYY-MM-DD-slug.md so reverse-alphabetic = newest first.
+
+;; --- mini markdown renderer (subset of md-to-html.wick) ---
+
+(def render-inline
+  (fn (s)
+    (re-replace
+      (re-replace
+        (re-replace
+          (re-replace s "`([^`]+)`" "<code>$1</code>")
+          "\\*\\*([^*]+)\\*\\*" "<strong>$1</strong>")
+        "\\*([^*]+)\\*" "<em>$1</em>")
+      "\\[([^\\]]+)\\]\\(([^)]+)\\)" "<a href=\"$2\">$1</a>")))
+
+(def render-block
+  (fn (block)
+    (let ((t (string-trim block)))
+      (cond ((= (string-length t) 0) "")
+            ((re-match? t "^# ")
+             (string-append "<h2>" (render-inline (substring t 2)) "</h2>"))
+            (else
+             (string-append "<p>" (render-inline t) "</p>"))))))
+
+(def string-join
+  (fn (sep xs)
+    (cond ((null? xs) "")
+          ((null? (cdr xs)) (car xs))
+          (else (fold (fn (acc s) (string-append acc sep s))
+                      (car xs) (cdr xs))))))
+
+(def md->html
+  (fn (md)
+    (string-join "\n"
+      (filter (fn (s) (> (string-length s) 0))
+              (map render-block (re-split md "\n\\s*\n"))))))
+
+;; --- per-post: read, wrap with date caption, render body ---
+
+(def render-post
+  (fn (filename)
+    (let ((md (read-file (string-append "posts/" filename))))
+      (string-append
+        "<article>\n"
+        "<p class=\"date\">" filename "</p>\n"
+        (md->html md)
+        "\n</article>"))))
+
+;; --- driver: collect .md files, reverse for newest-first, concat ---
+
+(def md-files
+  (filter (fn (n) (re-match? n "\\.md$"))
+          (list-dir "posts")))
+
+(def newest-first (reverse md-files))
+
+(def page-body (string-join "\n\n" (map render-post newest-first)))
+
+(def page
+  (string-append
+    "<!doctype html>\n"
+    "<html><head><meta charset=\"utf-8\"><title>posts</title></head>\n"
+    "<body>\n"
+    "<h1>posts</h1>\n"
+    page-body
+    "\n</body></html>\n"))
+
+(write-file "index.html" page)
+(print (string-append "wrote index.html · "
+                      (number->string (length md-files)) " posts"))
