@@ -1,6 +1,8 @@
 ;; tornado-near.wick — query tornadolookup.com for a few cities and print
 ;; the most-significant historical tornado within 20 miles of each.
 ;; CLI-only — http-get raises in the browser.
+;;
+;; API docs: https://tornadolookup.com/api
 
 (def headers {"User-Agent" "wick-examples/0.1 (p@pwhite.org)"})
 
