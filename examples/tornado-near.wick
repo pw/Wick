@@ -1,0 +1,49 @@
+;; tornado-near.wick — query tornadolookup.com for a few cities and print
+;; the most-significant historical tornado within 20 miles of each.
+;; CLI-only — http-get raises in the browser.
+
+(def headers {"User-Agent" "wick-examples/0.1 (p@pwhite.org)"})
+
+(def fetch
+  (fn (url)
+    (let ((r (http-get url headers)))
+      (if (= (dict-get r "status") 200)
+          (json-parse (dict-get r "body"))
+          (raise (string-append "HTTP " (number->string (dict-get r "status"))))))))
+
+;; integer-truncate a float for display ("3.688..." -> "3")
+(def trunc
+  (fn (n)
+    (or (re-find (number->string n) "^-?[0-9]+") (number->string n))))
+
+(def query
+  (fn (lat lng)
+    (fetch (string-append
+             "https://tornadolookup.com/api/nearby"
+             "?lat=" (number->string lat)
+             "&lng=" (number->string lng)
+             "&radius=20"))))
+
+(def report
+  (fn (city lat lng)
+    (let ((r (query lat lng)))
+      (let ((sig (dict-get r "most_significant" nil))
+            (n   (dict-get r "count")))
+        (print (string-append
+                 city " · " (trunc n) " tornadoes within 20 mi"))
+        (if sig
+            (print (string-append
+                     "  most significant: "
+                     (dict-get sig "famous_name"
+                       (string-append (dict-get sig "f_scale")
+                                      " — "
+                                      (dict-get sig "begin_date")))
+                     " · " (trunc (dict-get sig "deaths")) " dead"
+                     " · " (trunc (dict-get sig "distance_mi")) " mi"))
+            (print "  no significant tornado in window"))))))
+
+(report "joplin, mo"      37.0842 -94.5133)
+(report "moore, ok"       35.3395 -97.4867)
+(report "tuscaloosa, al"  33.2098 -87.5692)
+(report "wichita falls"   33.9137 -98.4934)
+(report "albuquerque"     35.0844 -106.6504)

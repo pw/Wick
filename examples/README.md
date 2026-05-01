@@ -9,6 +9,7 @@ Substantive programs in wick. Each runs end-to-end against the Go binary at the 
 | `weather.wick` | yes | NOAA forecast for Albuquerque |
 | `hn-top.wick` | yes | Top 5 Hacker News stories |
 | `bake.wick` | no | Static blog generator: walks `posts/`, emits `index.html` |
+| `tornado-near.wick` | yes | Query tornadolookup.com for the most-significant tornado near a few cities |
 
 Run them like:
 
