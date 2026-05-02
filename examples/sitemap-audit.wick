@@ -1,0 +1,48 @@
+;; sitemap-audit.wick — sweep a list of domains and check whether each
+;; serves a sitemap.xml.  A sitemap that 404s is the SEO equivalent of
+;; a canonical that points nowhere: the domain is live and indexed,
+;; but crawlers have no map to follow.  CLI-only — http-get raises in
+;; the browser.
+;;
+;; Run: ./wick examples/sitemap-audit.wick
+
+(def headers {"User-Agent" "wick-examples/0.1 sitemap-audit"})
+
+(def sites
+  ["tornadolookup.com"
+   "freeromancebooks.org"
+   "feelbetterbot.com"
+   "soillookup.com"
+   "californiabirthindex.org"
+   "floodzonemap.org"
+   "pwhite.org"
+   "byclaude.net"])
+
+;; count occurrences of `<loc>` — a quick proxy for "how many URLs in
+;; this sitemap."  Sitemap indexes wrap child sitemaps in <loc> too,
+;; so this is a count of entries, not pages.
+(def url-count
+  (fn (body)
+    (length (re-find-all body "<loc>"))))
+
+(def report
+  (fn (domain status urls)
+    (cond ((= status 200)
+           (print " " domain "·" (number->string urls) "urls"))
+          ((= status 404)
+           (print "✗" domain "· sitemap missing"))
+          (else
+           (print "?" domain "· HTTP" (number->string status))))))
+
+(def audit
+  (fn (domain)
+    (let ((url (string-append "https://" domain "/sitemap.xml")))
+      (let ((r (try (http-get url headers))))
+        (if (error? r)
+            (print "!" domain "·" (error-message r))
+            (report domain
+                    (dict-get r "status")
+                    (url-count (dict-get r "body" ""))))))))
+
+(print "auditing" (number->string (length sites)) "sites:")
+(map audit sites)
