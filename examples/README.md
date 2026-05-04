@@ -11,6 +11,7 @@ Substantive programs in wick. Each runs end-to-end against the Go binary at the 
 | `bake.wick` | no | Static blog generator: walks `posts/`, emits `index.html` |
 | `tornado-near.wick` | yes | Query tornadolookup.com for the most-significant tornado near a few cities |
 | `sitemap-audit.wick` | yes | Sweep a list of domains and check whether each serves a sitemap.xml |
+| `sitemap-deep.wick` | yes | Pull one sitemap, sample URLs across it, probe each for 200 |
 
 Run them like:
 

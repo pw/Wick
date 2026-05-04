@@ -1,0 +1,89 @@
+;; sitemap-deep.wick — go one level deeper than sitemap-audit.
+;;
+;; sitemap-audit.wick checks whether a sitemap exists at all.  But a
+;; sitemap can return 200 and still be its own kind of broken: it lists
+;; URLs that 404, or that point at the wrong canonical, or that haven't
+;; existed since a refactor three deploys ago.  The crawler is told
+;; "here are my pages" and finds a wall of dead doors.
+;;
+;; This pulls one sitemap, extracts the <loc> URLs, takes a stride
+;; sample (every Nth — sitemaps are usually emitted in some structured
+;; order, so first/middle/last are not interchangeable), and probes
+;; each for a 200.
+;;
+;; CLI-only — http-get raises in the browser.
+;; Run: ./wick examples/sitemap-deep.wick
+
+(def sitemap-url "https://tornadolookup.com/sitemap.xml")
+(def sample-size 8)
+(def headers {"User-Agent" "wick-examples/0.1 sitemap-deep"})
+
+;; integer floor division: wick / is float, but stride needs ints.
+(def floor-div (fn (a b) (/ (- a (mod a b)) b)))
+
+;; first element, then every nth after — like sed -n '0~5p' but
+;; expressed structurally.
+(def take-every
+  (fn (n xs)
+    (if (null? xs) '()
+        (cons (car xs) (take-every n (drop n xs))))))
+
+;; pull <loc>...</loc> bodies as a flat list of trimmed URL strings.
+(def extract-locs
+  (fn (xml)
+    (map (fn (m)
+           (string-trim
+             (string-replace (string-replace m "<loc>" "") "</loc>" "")))
+         (re-find-all xml "<loc>[^<]+</loc>"))))
+
+;; pick n urls evenly across xs.  if xs is shorter than n, return all.
+(def stride-sample
+  (fn (n xs)
+    (let ((total (length xs)))
+      (if (<= total n) xs
+          (take n (take-every (floor-div total n) xs))))))
+
+;; probe one url, return a dict the report can pattern-match on.
+(def probe
+  (fn (url)
+    (let ((r (try (http-get url headers))))
+      (if (error? r)
+          {"url" url "status" 0 "error" (error-message r)}
+          {"url" url "status" (dict-get r "status")}))))
+
+;; trim long urls so the report stays tidy.
+(def short-url
+  (fn (url)
+    (let ((u (string-replace (string-replace url "https://" "") "http://" "")))
+      (if (> (string-length u) 60)
+          (string-append (substring u 0 57) "...")
+          u))))
+
+(def report-row
+  (fn (r)
+    (let ((s (dict-get r "status"))
+          (u (short-url (dict-get r "url"))))
+      (cond
+        ((= s 200) (print "  200" u))
+        ((= s 0)   (print "  err" (string-append (dict-get r "error" "") " " u)))
+        (else      (print (string-append "  " (number->string s)) u))))))
+
+(print "fetching" sitemap-url)
+(def resp
+  (try (http-get sitemap-url headers)
+       (fn (e)
+         (begin (print "fetch failed:" (error-message e))
+                (raise (error-message e))))))
+
+(if (not (= (dict-get resp "status") 200))
+    (print "sitemap returned HTTP" (number->string (dict-get resp "status")))
+    (let ((urls (extract-locs (dict-get resp "body"))))
+      (print (string-append "sitemap lists " (number->string (length urls))
+                            " urls; sampling " (number->string sample-size) ":"))
+      (let ((results (map probe (stride-sample sample-size urls))))
+        (for-each report-row results)
+        (let ((bad (filter (fn (r) (not (= (dict-get r "status") 200))) results)))
+          (if (null? bad)
+              (print "all sampled urls 200")
+              (print (number->string (length bad)) "of"
+                     (number->string (length results)) "broken"))))))
