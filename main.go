@@ -8,7 +8,7 @@
 // Primitives: arithmetic, comparison, cons car cdr list null? pair? eq? not
 //             apply mod string-length string-append number->string string->number
 //             string-contains? string-split string-replace substring
-//             string-upcase string-downcase string-trim
+//             string-upcase string-downcase string-trim string-join
 //             re-match? re-find re-find-all re-replace re-split
 //             print display newline
 //             dict dict-get dict-set dict-del dict-has? dict-keys dict-values
@@ -17,9 +17,9 @@
 //             read-file write-file append-file file-exists?
 //             http-get http-post
 //             error? error-message raise
-// Stdlib (written in wick): map filter fold reverse range length sum product
+// Stdlib (written in wick): map filter fold for-each reverse range length sum product
 //             take nth drop last append inc dec zero? positive? negative? even? odd?
-//             abs min max member? sort
+//             abs min max member? find any? all? sort
 //
 // Run: `wick` for REPL, `wick file.wick` to execute a file.
 
@@ -1054,6 +1054,35 @@ func defaultEnv() *Env {
 		}
 		return Str(strings.TrimSpace(string(s))), nil
 	}})
+	env.Set("string-join", &Builtin{name: "string-join", f: func(args []Value) (Value, error) {
+		if len(args) < 1 || len(args) > 2 {
+			return nil, errors.New("string-join: need 1-2 args (list [separator])")
+		}
+		l, ok := args[0].(List)
+		if !ok {
+			return nil, fmt.Errorf("string-join: need list, got %s", args[0])
+		}
+		sep := ""
+		if len(args) == 2 {
+			s, ok := args[1].(Str)
+			if !ok {
+				return nil, fmt.Errorf("string-join: separator must be string, got %s", args[1])
+			}
+			sep = string(s)
+		}
+		parts := make([]string, 0, len(l))
+		for _, v := range l {
+			switch x := v.(type) {
+			case Str:
+				parts = append(parts, string(x))
+			case Num:
+				parts = append(parts, fmt.Sprintf("%g", float64(x)))
+			default:
+				parts = append(parts, fmt.Sprint(v))
+			}
+		}
+		return Str(strings.Join(parts, sep)), nil
+	}})
 
 	// ---------- Regex ----------
 	// Patterns are Go's RE2 syntax. Data-first (string, pattern) to match the
@@ -1700,6 +1729,10 @@ const stdlib = `
           (sort cmp (filter (fn (y) (cmp y pivot)) rest))
           (cons pivot
             (sort cmp (filter (fn (y) (not (cmp y pivot))) rest))))))))
+
+(def for-each (fn (f xs)
+  (if (null? xs) nil
+      (begin (f (car xs)) (for-each f (cdr xs))))))
 `
 
 // ---------- REPL ----------

@@ -23,18 +23,12 @@
             (else
              (string-append "<p>" (render-inline t) "</p>"))))))
 
-(def string-join
-  (fn (sep xs)
-    (cond ((null? xs) "")
-          ((null? (cdr xs)) (car xs))
-          (else (fold (fn (acc s) (string-append acc sep s))
-                      (car xs) (cdr xs))))))
-
 (def md->html
   (fn (md)
-    (string-join "\n"
+    (string-join
       (filter (fn (s) (> (string-length s) 0))
-              (map render-block (re-split md "\n\\s*\n"))))))
+              (map render-block (re-split md "\n\\s*\n")))
+      "\n")))
 
 ;; --- per-post: read, wrap with date caption, render body ---
 
@@ -55,7 +49,7 @@
 
 (def newest-first (reverse md-files))
 
-(def page-body (string-join "\n\n" (map render-post newest-first)))
+(def page-body (string-join (map render-post newest-first) "\n\n"))
 
 (def page
   (string-append

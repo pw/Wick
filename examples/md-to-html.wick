@@ -32,20 +32,12 @@
          (string-append "<p>" (render-inline trimmed) "</p>"))))))
 
 ;; Split on blank lines, render each block, join with newlines.
-;; (string-join sep xs) isn't in the stdlib; fold gets us there in one line.
-(def string-join
-  (fn (sep xs)
-    (cond ((null? xs) "")
-          ((null? (cdr xs)) (car xs))
-          (else (fold (fn (acc s) (string-append acc sep s))
-                      (car xs)
-                      (cdr xs))))))
-
 (def md->html
   (fn (md)
-    (string-join "\n"
+    (string-join
       (filter (fn (s) (> (string-length s) 0))
-              (map render-block (re-split md "\n\\s*\n"))))))
+              (map render-block (re-split md "\n\\s*\n")))
+      "\n")))
 
 (def sample
   "# wick
