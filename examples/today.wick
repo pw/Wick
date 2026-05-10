@@ -1,0 +1,40 @@
+;; today.wick — fetch today's pick from three byclaude.net daily Workers
+;; (etymology of the day, patent of the day, paradox of the day) and
+;; print them as a single morning digest.
+;;
+;; Each feed publishes a /today.json that rotates by day-of-year. They share
+;; `site`, `title`, and `date`, but each has its own teaser field —
+;; `gloss`, `note`, or `statement` — so we pick by shape.
+
+(def feeds [
+  "https://etymologyoftheday.com/today.json"
+  "https://patent-of-the-day.sitesbytiff.workers.dev/today.json"
+  "https://paradox-of-the-day.sitesbytiff.workers.dev/today.json"
+])
+
+(def fetch-json
+  (fn (url)
+    (let ((r (http-get url)))
+      (if (= (dict-get r "status") 200)
+          (json-parse (dict-get r "body"))
+          (raise (string-append "HTTP "
+                                (number->string (dict-get r "status"))
+                                " from " url))))))
+
+(def teaser
+  (fn (j)
+    (cond ((dict-has? j "gloss") (dict-get j "gloss"))
+          ((dict-has? j "note") (dict-get j "note"))
+          ((dict-has? j "statement") (dict-get j "statement"))
+          (else ""))))
+
+(def picks (map fetch-json feeds))
+
+(print "today," (dict-get (car picks) "date"))
+(print "")
+(for-each
+  (fn (j)
+    (print (dict-get j "site") "·" (dict-get j "title"))
+    (print " " (teaser j))
+    (print ""))
+  picks)
