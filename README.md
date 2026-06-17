@@ -40,7 +40,7 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - **Tail-call optimization** — `(count-down 100000)` runs without blowing the stack
 - Special forms: `quote ' quasiquote ` `unquote ,` `unquote-splicing ,@` `if cond def set! fn let begin and or try defmacro`
 - **Macros**: `defmacro` + quasiquote let you grow the language from inside it — `when`, `unless`, `while`, `->`, and a `match` pattern matcher ship in the stdlib *as macros*, not as evaluator built-ins. `gensym` gives hygienic temporaries. See [the macro section](#macros) below.
-- **Pattern matching**: `(match subj (pattern body…) …)` — wildcards, variable binds, literals, `'sym`, `(cons h t)`, and `(list …)` patterns. It's ~35 lines of stdlib wick, not a special form: proof the macro system is enough to add a major feature without touching the host. See [examples/deriv.wick](examples/deriv.wick).
+- **Pattern matching**: `(match subj (pattern body…) …)` — wildcards, variable binds, literals, `'sym`, `(cons h t)`, and `(list …)` patterns. It's ~60 lines of stdlib wick, not a special form: proof the macro system is enough to add a major feature without touching the host. See [examples/deriv.wick](examples/deriv.wick).
 - **Variadic params**: `(fn (a &rest more) …)` binds leftover arguments as a list; works for functions and macros, and through `apply`.
 - **Literal forms**: `[a b c]` is sugar for `(list a b c)`; `{"k" v ...}` is sugar for `(dict "k" v ...)`. Values are normal expressions and evaluate at runtime.
 - Built-in primitives: arithmetic and comparison, `cons car cdr list null? pair? eq? symbol? number? string? not apply print display newline mod string-length string-append number->string string->number`
@@ -151,7 +151,7 @@ builds up `for`, `repeat`, and a tiny test DSL.
 The strongest evidence that this is enough: `match`, the pattern matcher in
 the stdlib, is itself just a macro. It walks its patterns *as data* at
 expansion time and emits the nested `if`/`let` chain that tests and binds —
-about thirty-five lines of wick, no evaluator change. A whole language feature
+about sixty lines of wick, no evaluator change. A whole language feature
 becomes a library.
 
 ```scheme
