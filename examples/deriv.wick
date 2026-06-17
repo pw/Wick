@@ -1,0 +1,70 @@
+; deriv.wick — symbolic differentiation, the canonical lisp showcase.
+;
+; The whole program is two passes over expressions-as-data: `deriv` applies the
+; calculus rules, `simplify` folds the constants away. Both are written with
+; `match` (which reads an expression's shape) and quasiquote (which builds the
+; next expression) — code consuming code, then producing it. Run with
+;   ./wick examples/deriv.wick
+;
+; Expressions are ordinary wick lists with a number, a symbol, or one of
+; (+ a b) (- a b) (* a b) (/ a b) (expt base power) — power a constant.
+
+; ---- differentiate e with respect to the variable x ----
+(def deriv (fn (e x)
+  (match e
+    ((list '+ a b)    `(+ ,(deriv a x) ,(deriv b x)))
+    ((list '- a b)    `(- ,(deriv a x) ,(deriv b x)))
+    ((list '* a b)    `(+ (* ,a ,(deriv b x)) (* ,(deriv a x) ,b)))    ; product rule
+    ((list '/ a b)    `(/ (- (* ,(deriv a x) ,b) (* ,a ,(deriv b x)))  ; quotient rule
+                          (* ,b ,b)))
+    ((list 'expt a n) `(* (* ,n (expt ,a ,(- n 1))) ,(deriv a x)))     ; power + chain
+    (atom (cond ((number? atom)                  0)                    ; constant
+                ((and (symbol? atom) (eq? atom x)) 1)                   ; the variable
+                ((symbol? atom)                  0)                     ; other variable
+                (else (raise "deriv: cannot differentiate")))))))
+
+; ---- collapse the obvious: fold constants, drop +0, *1, *0, ^1 ... ----
+(def num? (fn (v) (number? v)))
+(def s+ (fn (a b) (cond ((and (num? a) (num? b)) (+ a b))
+                        ((eq? a 0) b) ((eq? b 0) a) (else `(+ ,a ,b)))))
+(def s- (fn (a b) (cond ((and (num? a) (num? b)) (- a b))
+                        ((eq? b 0) a) (else `(- ,a ,b)))))
+(def s* (fn (a b) (cond ((or (eq? a 0) (eq? b 0)) 0)
+                        ((and (num? a) (num? b)) (* a b))
+                        ((eq? a 1) b) ((eq? b 1) a) (else `(* ,a ,b)))))
+(def s/ (fn (a b) (cond ((eq? a 0) 0) ((eq? b 1) a) (else `(/ ,a ,b)))))
+(def s^ (fn (a n) (cond ((eq? n 0) 1) ((eq? n 1) a) (else `(expt ,a ,n)))))
+
+(def simplify (fn (e)
+  (match e
+    ((list '+ a b)    (s+ (simplify a) (simplify b)))
+    ((list '- a b)    (s- (simplify a) (simplify b)))
+    ((list '* a b)    (s* (simplify a) (simplify b)))
+    ((list '/ a b)    (s/ (simplify a) (simplify b)))
+    ((list 'expt a n) (s^ (simplify a) n))
+    (atom atom))))
+
+; ---- show one worked derivative ----
+(def demo (fn (e)
+  (display "  d/dx ") (display e) (newline)
+  (display "      raw        ") (display (deriv e 'x)) (newline)
+  (display "      simplified ") (display (simplify (deriv e 'x))) (newline)
+  (newline)))
+
+(display "symbolic differentiation in wick:") (newline) (newline)
+(demo '(+ x 3))
+(demo '(* x x))
+(demo '(expt x 3))
+(demo '(* 3 (+ x 1)))
+(demo '(/ 1 x))
+(demo '(+ (* 3 (expt x 2)) (* 2 x)))
+
+; a tiny self-check so the example doubles as a regression test
+(def check= (fn (got want)
+  (if (eq? got want) (begin (display "  ok   ") (display got) (newline))
+      (begin (display "  FAIL got=") (display got) (display " want=") (display want) (newline)))))
+(display "checks:") (newline)
+(check= (simplify (deriv '(+ x 3) 'x))       1)
+(check= (simplify (deriv '(* x x) 'x))       '(+ x x))
+(check= (simplify (deriv '(expt x 3) 'x))    '(* 3 (expt x 2)))
+(check= (simplify (deriv '(* 5 x) 'x))       5)

@@ -39,10 +39,11 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - First-class functions and closures with lexical scope
 - **Tail-call optimization** — `(count-down 100000)` runs without blowing the stack
 - Special forms: `quote ' quasiquote ` `unquote ,` `unquote-splicing ,@` `if cond def set! fn let begin and or try defmacro`
-- **Macros**: `defmacro` + quasiquote let you grow the language from inside it — `when`, `unless`, `while`, and `->` ship in the stdlib *as macros*, not as evaluator built-ins. `gensym` gives hygienic temporaries. See [the macro section](#macros) below.
+- **Macros**: `defmacro` + quasiquote let you grow the language from inside it — `when`, `unless`, `while`, `->`, and a `match` pattern matcher ship in the stdlib *as macros*, not as evaluator built-ins. `gensym` gives hygienic temporaries. See [the macro section](#macros) below.
+- **Pattern matching**: `(match subj (pattern body…) …)` — wildcards, variable binds, literals, `'sym`, `(cons h t)`, and `(list …)` patterns. It's ~35 lines of stdlib wick, not a special form: proof the macro system is enough to add a major feature without touching the host. See [examples/deriv.wick](examples/deriv.wick).
 - **Variadic params**: `(fn (a &rest more) …)` binds leftover arguments as a list; works for functions and macros, and through `apply`.
 - **Literal forms**: `[a b c]` is sugar for `(list a b c)`; `{"k" v ...}` is sugar for `(dict "k" v ...)`. Values are normal expressions and evaluate at runtime.
-- Built-in primitives: arithmetic and comparison, `cons car cdr list null? pair? eq? not apply print display newline mod string-length string-append number->string string->number`
+- Built-in primitives: arithmetic and comparison, `cons car cdr list null? pair? eq? symbol? number? string? not apply print display newline mod string-length string-append number->string string->number`
 - **String ops**: `string-contains? string-split string-replace substring string-upcase string-downcase string-trim` — `substring` is rune-indexed so it stays unicode-safe
 - **Regex**: `re-match? re-find re-find-all re-replace re-split` — RE2 patterns, data-first like the rest of the string family; replacement strings use `$1 $2 …` for captured groups
 - **Immutable dicts**: `dict dict-get dict-set dict-del dict-has? dict-keys dict-values dict-size dict?` — string-keyed, structural equality, every mutation returns a new dict
@@ -50,7 +51,7 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - **File IO**: `read-file write-file append-file file-exists?` — enough to script real things from disk
 - **HTTP**: `http-get url [headers]` and `http-post url body [headers]` — each returns `(dict "status" 200 "body" "..." "headers" {...})` on response, raises on network error so you can `try` it. The optional `headers` arg is a dict of string→string (e.g. `{"Authorization" "Bearer xxx"}` or `{"Content-Type" "application/json"}`).
 - **Errors**: `try`, `raise`, `error?`, `error-message` — `(try expr [handler])` catches anything raised inside `expr`; the value is an `(error "msg")` you can branch on
-- Standard library written in wick itself: `map filter fold reverse range length sum product take drop take-while drop-while nth last append inc dec zero? positive? negative? even? odd? abs min max member? find any? all? sort` plus the macros `when unless while ->`
+- Standard library written in wick itself: `map filter fold reverse range length sum product take drop take-while drop-while nth last append inc dec zero? positive? negative? even? odd? abs min max member? find any? all? sort` plus the macros `when unless while -> match`
 - REPL with multi-line input, string-aware paren balancing, comment handling
 - File execution mode
 
@@ -146,6 +147,22 @@ runs the body to get an expansion, and *loops* on that expansion rather
 than recursing — so macro-defined control flow (`while`, `->`) keeps
 full tail-call optimization. [examples/macros.wick](examples/macros.wick)
 builds up `for`, `repeat`, and a tiny test DSL.
+
+The strongest evidence that this is enough: `match`, the pattern matcher in
+the stdlib, is itself just a macro. It walks its patterns *as data* at
+expansion time and emits the nested `if`/`let` chain that tests and binds —
+about thirty-five lines of wick, no evaluator change. A whole language feature
+becomes a library.
+
+```scheme
+(match expr
+  ((list '+ a b)    `(+ ,(deriv a x) ,(deriv b x)))   ; bind a and b
+  ((list 'expt a n) `(* (* ,n (expt ,a ,(- n 1))) ,(deriv a x)))
+  (atom (cond ((number? atom) 0) ((eq? atom x) 1) (else 0))))
+```
+
+[examples/deriv.wick](examples/deriv.wick) is a symbolic differentiator built
+on it: `match` reads each expression's shape, quasiquote builds the next one.
 
 ## The eval loop
 

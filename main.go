@@ -1013,6 +1013,27 @@ func defaultEnv() *Env {
 		l, ok := args[0].(List)
 		return Bool(ok && len(l) > 0), nil
 	}})
+	env.Set("symbol?", &Builtin{name: "symbol?", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("symbol?: need 1 arg")
+		}
+		_, ok := args[0].(Sym)
+		return Bool(ok), nil
+	}})
+	env.Set("number?", &Builtin{name: "number?", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("number?: need 1 arg")
+		}
+		_, ok := args[0].(Num)
+		return Bool(ok), nil
+	}})
+	env.Set("string?", &Builtin{name: "string?", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("string?: need 1 arg")
+		}
+		_, ok := args[0].(Str)
+		return Bool(ok), nil
+	}})
 	env.Set("eq?", &Builtin{name: "eq?", f: func(args []Value) (Value, error) {
 		if len(args) != 2 {
 			return nil, errors.New("eq?: need 2 args")
@@ -1977,6 +1998,86 @@ const stdlib = `
                         (quasiquote ((unquote (car form)) (unquote x) (unquote-splicing (cdr form))))
                         (list form x))))
           (quasiquote (-> (unquote step) (unquote-splicing (cdr forms))))))))
+
+; ---- match: a pattern-matching macro, grown from inside the language ----
+; (match subject (pattern body...) ...) tries each clause top to bottom, binds
+; the first pattern that fits, and runs its body. Patterns:
+;   _                wildcard -- matches anything, binds nothing
+;   name             a bare symbol -- matches anything, binds it to the value
+;   42  "hi"  #t     a literal -- matches by eq?
+;   (quote sym)      matches the symbol sym   (written 'sym in a .wick file)
+;   (cons hp tp)     a non-empty list -- hp vs (car v), tp vs (cdr v)
+;   (list p1 .. pn)  a list of exactly n elements, each pattern in turn
+;   (list)           the empty list
+; match is not a special form: it is the ~35 lines of wick below, proof that
+; the macro system is enough to add a major feature without touching the host.
+; The helpers run at expansion time, walking the pattern as data to emit code.
+
+(def match-wild?  (fn (p) (eq? p (quote _))))
+(def match-var?   (fn (p) (and (symbol? p) (not (eq? p (quote _))))))
+(def match-quote? (fn (p) (and (pair? p) (eq? (car p) (quote quote)))))
+(def match-cons?  (fn (p) (and (pair? p) (eq? (car p) (quote cons)))))
+(def match-list?  (fn (p) (and (pair? p) (eq? (car p) (quote list)))))
+
+; match-test: a form that evaluates to #t exactly when value-form v fits p.
+(def match-test (fn (p v)
+  (cond ((match-wild? p)  #t)
+        ((match-var? p)   #t)
+        ((match-quote? p) (quasiquote (eq? (unquote v) (unquote p))))
+        ((match-cons? p)
+           (let ((hp (car (cdr p))) (tp (car (cdr (cdr p)))))
+             (quasiquote
+               (if (pair? (unquote v))
+                   (if (unquote (match-test hp (quasiquote (car (unquote v)))))
+                       (unquote (match-test tp (quasiquote (cdr (unquote v)))))
+                       #f)
+                   #f))))
+        ((match-list? p)  (match-test-list (cdr p) v))
+        ((pair? p)        (raise "match: unknown pattern form"))
+        (else (quasiquote (eq? (unquote v) (unquote p)))))))
+
+(def match-test-list (fn (ps v)
+  (if (null? ps)
+      (quasiquote (null? (unquote v)))
+      (quasiquote
+        (if (pair? (unquote v))
+            (if (unquote (match-test (car ps) (quasiquote (car (unquote v)))))
+                (unquote (match-test-list (cdr ps) (quasiquote (cdr (unquote v)))))
+                #f)
+            #f)))))
+
+; match-binds: the (name access-form) pairs a pattern introduces.
+(def match-binds (fn (p v)
+  (cond ((match-wild? p)  (quote ()))
+        ((match-var? p)   (list (list p v)))
+        ((match-quote? p) (quote ()))
+        ((match-cons? p)
+           (let ((hp (car (cdr p))) (tp (car (cdr (cdr p)))))
+             (append (match-binds hp (quasiquote (car (unquote v))))
+                     (match-binds tp (quasiquote (cdr (unquote v)))))))
+        ((match-list? p)  (match-binds-list (cdr p) v))
+        (else (quote ())))))
+
+(def match-binds-list (fn (ps v)
+  (if (null? ps) (quote ())
+      (append (match-binds (car ps) (quasiquote (car (unquote v))))
+              (match-binds-list (cdr ps) (quasiquote (cdr (unquote v))))))))
+
+(def match-clauses (fn (v clauses)
+  (if (null? clauses)
+      (quasiquote (raise "match: no clause matched"))
+      (let ((clause (car clauses)))
+        (let ((pat (car clause)) (body (cdr clause)))
+          (quasiquote
+            (if (unquote (match-test pat v))
+                (let (unquote (match-binds pat v)) (unquote-splicing body))
+                (unquote (match-clauses v (cdr clauses))))))))))
+
+(defmacro match (subject &rest clauses)
+  (let ((v (gensym "m")))
+    (quasiquote
+      (let (((unquote v) (unquote subject)))
+        (unquote (match-clauses v clauses))))))
 `
 
 // ---------- REPL ----------

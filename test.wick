@@ -74,6 +74,26 @@
 (check "thread-none"  (-> 42)              42)
 (check "thread-mix"   (-> 5 (- 1) (* 2) inc) 9) ; (inc (* (- 5 1) 2))
 
+; ---- stdlib macro: match (pattern matching, built from inside the language) ----
+(check "match-wild"    (match 5 (_ "any"))                  "any")
+(check "match-literal" (match 5 (3 "no") (5 "yes") (_ "?")) "yes")
+(check "match-var"     (match 7 (0 "z") (n (* n n)))        49)
+(check "match-string"  (match "hi" (s (string-append s s))) "hihi")
+(check "match-quote"   (match 'foo ('bar 1) ('foo 2) (_ 3)) 2)
+(check "match-cons-h"  (match [1 2 3] ((cons h t) h))       1)
+(check "match-cons-t"  (match [1 2 3] ((cons h t) t))       [2 3])
+(check "match-list2"   (match [1 2] ((list a) "one") ((list a b) (+ a b))) 3)
+(check "match-empty"   (match '() ((list) "empty") (_ "no")) "empty")
+(check "match-order"   (match [4 5] ((list a) "one") ((list a b) "two")) "two")
+; nested + quote head: dispatch on a symbolic expression's operator
+(check "match-nested"
+  (match '(* x 2) ((list '+ a b) 'sum) ((list '* a b) (list 'prod a b)) (_ 'other))
+  (list 'prod 'x 2))
+; no clause matches -> raises (caught with try so the suite continues)
+(check "match-nomatch"
+  (try (match 9 (1 "a") (2 "b")) (fn (e) "raised"))
+  "raised")
+
 ; ---- macros compose with tail recursion (no stack blowup) ----
 (check "while-big"
   (let ((i 0))

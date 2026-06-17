@@ -5,6 +5,7 @@ Substantive programs in wick. Each runs end-to-end against the Go binary at the 
 | File | Needs network | What it does |
 |------|---------------|--------------|
 | `macros.wick` | no | Tour of the macro system: `for`/`repeat`/`inc!`, a code-as-data test DSL, threading with `->` |
+| `deriv.wick` | no | Symbolic differentiation + simplification, written with `match` and quasiquote |
 | `word-freq.wick` | no | Word frequency counter, top 10 |
 | `md-to-html.wick` | no | Markdown-ish → HTML (headings, paragraphs, bold/italic/code/links) |
 | `weather.wick` | yes | NOAA forecast for Albuquerque |
