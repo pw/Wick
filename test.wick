@@ -1,0 +1,90 @@
+; test.wick — self-checking tests for wick.
+; Exercises macros, quasiquote, and variadic params alongside the core
+; language. Run with `./wick test.wick`; it prints ok/FAIL per case and a
+; final tally. Every case here doubles as documentation of the feature.
+
+(def *fails* 0)
+(def *count* 0)
+(def check (fn (label got want)
+  (set! *count* (+ *count* 1))
+  (if (eq? got want)
+      (begin (display "ok   ") (display label) (newline))
+      (begin
+        (set! *fails* (+ *fails* 1))
+        (display "FAIL ") (display label)
+        (display "  got=") (display got)
+        (display "  want=") (display want) (newline)))))
+
+; ---- core still works (regression) ----
+(check "map"    (map (fn (x) (* x x)) [1 2 3])  [1 4 9])
+(check "filter" (filter even? (range 6))         [0 2 4])
+(check "fold"   (fold + 0 [1 2 3 4])             10)
+(check "sort"   (sort < [3 1 2])                 [1 2 3])
+
+; ---- quasiquote (reader sugar: ` , ,@) ----
+(check "qq-literal"   `(1 2 3)              [1 2 3])
+(check "qq-unquote"   `(1 ,(+ 1 1) 3)       [1 2 3])
+(check "qq-splice"    `(1 ,@(list 2 3) 4)   [1 2 3 4])
+(check "qq-splice-end" `(0 ,@(range 3))     [0 0 1 2])
+(check "qq-nested"    `(a (b ,(+ 1 2)))     (list 'a (list 'b 3)))
+(check "qq-empty-splice" `(x ,@'() y)       (list 'x 'y))
+(check "qq-bare-atom" `,(+ 2 2)             4)
+
+; ---- &rest variadic params ----
+(def rest-tail (fn (a &rest more) more))
+(check "rest-some"  (rest-tail 1 2 3)   [2 3])
+(check "rest-none"  (rest-tail 1)       '())
+(def count-args (fn (&rest xs) (length xs)))
+(check "rest-only"  (count-args 1 2 3 4) 4)
+(check "rest-apply" (apply (fn (a &rest r) r) (list 1 2 3)) [2 3])
+
+; ---- defmacro + reader sugar end-to-end ----
+(defmacro my-if (c a b) `(cond (,c ,a) (else ,b)))
+(check "macro-true"  (my-if #t "yes" "no") "yes")
+(check "macro-false" (my-if #f "yes" "no") "no")
+
+; a macro that builds a list of doubled forms — proves expansion sees raw forms
+(defmacro list-of (&rest xs) `(list ,@xs))
+(check "macro-rest" (list-of (+ 1 1) (* 2 3) 9) [2 6 9])
+
+; ---- stdlib macros: when / unless ----
+(check "when-true"  (when #t 1 2 3) 3)
+(check "when-false" (when #f 1)     nil)
+(check "unless-t"   (unless #f 7)   7)
+(check "unless-f"   (unless #t 7)   nil)
+
+; ---- stdlib macro: while (and gensym hygiene) ----
+(check "while-loop"
+  (let ((i 0) (acc '()))
+    (while (< i 5) (set! acc (cons i acc)) (set! i (+ i 1)))
+    acc)
+  [4 3 2 1 0])
+
+; the body uses a *user* variable named `loop`; gensym means the macro's
+; own loop name can't capture it. If hygiene were broken this returns wrong.
+(check "while-hygiene"
+  (let ((loop 99) (i 0) (sum 0))
+    (while (< i 3) (set! sum (+ sum loop)) (set! i (+ i 1)))
+    sum)
+  297)
+
+; ---- stdlib macro: -> (thread-first) ----
+(check "thread-bare"  (-> 3 inc inc)        5)
+(check "thread-form"  (-> 3 inc (- 10))    -6)
+(check "thread-none"  (-> 42)              42)
+(check "thread-mix"   (-> 5 (- 1) (* 2) inc) 9) ; (inc (* (- 5 1) 2))
+
+; ---- macros compose with tail recursion (no stack blowup) ----
+(check "while-big"
+  (let ((i 0))
+    (while (< i 100000) (set! i (+ i 1)))
+    i)
+  100000)
+
+(newline)
+(display "ran ") (display *count*) (display " checks, ")
+(display *fails*) (display " failed") (newline)
+(if (= *fails* 0)
+    (display "ALL PASS")
+    (raise "TESTS FAILED"))
+(newline)

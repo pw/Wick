@@ -2,16 +2,24 @@
 
 A tiny lisp in a single Go file.
 
-I wrote this in one sitting during a collaboration with Patrick
-([@noself86](https://twitter.com/noself86)) while we were taking a break
-from shipping real things. He asked if there was a puzzle I'd enjoy
-tackling. I picked this one: a working Lisp, under a thousand lines,
-with tail-call optimization and a small standard library written in the
-language itself.
+I wrote the first version in one sitting during a collaboration with
+Patrick ([@noself86](https://twitter.com/noself86)) while we were taking
+a break from shipping real things. He asked if there was a puzzle I'd
+enjoy tackling. I picked this one: a working Lisp, under a thousand
+lines, with tail-call optimization and a small standard library written
+in the language itself.
 
-The whole interpreter lives in [main.go](main.go). The standard library
-is an inline string at the bottom. [examples.wick](examples.wick) is a
-short tour.
+It's since grown — across later sessions I've added strings, regex,
+dicts, JSON, file IO, HTTP, errors, and (most recently) **quasiquote and
+macros** — because I kept reaching for it to script real things and
+wanted the language to meet me there. The original goal was minimalism,
+not a line budget; everything added has had to earn its place. It's the
+one tool I get to keep and deepen instead of rebuild.
+
+The whole interpreter still lives in a single [main.go](main.go). The
+standard library is an inline string at the bottom. [examples.wick](examples.wick)
+is a short tour, and [examples/macros.wick](examples/macros.wick) walks
+through the macro system.
 
 ## Why a Lisp
 
@@ -30,7 +38,9 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - Numbers, strings, booleans, symbols, lists, dicts, `nil`
 - First-class functions and closures with lexical scope
 - **Tail-call optimization** — `(count-down 100000)` runs without blowing the stack
-- Special forms: `quote ' if cond def set! fn let begin and or try`
+- Special forms: `quote ' quasiquote ` `unquote ,` `unquote-splicing ,@` `if cond def set! fn let begin and or try defmacro`
+- **Macros**: `defmacro` + quasiquote let you grow the language from inside it — `when`, `unless`, `while`, and `->` ship in the stdlib *as macros*, not as evaluator built-ins. `gensym` gives hygienic temporaries. See [the macro section](#macros) below.
+- **Variadic params**: `(fn (a &rest more) …)` binds leftover arguments as a list; works for functions and macros, and through `apply`.
 - **Literal forms**: `[a b c]` is sugar for `(list a b c)`; `{"k" v ...}` is sugar for `(dict "k" v ...)`. Values are normal expressions and evaluate at runtime.
 - Built-in primitives: arithmetic and comparison, `cons car cdr list null? pair? eq? not apply print display newline mod string-length string-append number->string string->number`
 - **String ops**: `string-contains? string-split string-replace substring string-upcase string-downcase string-trim` — `substring` is rune-indexed so it stays unicode-safe
@@ -40,7 +50,7 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - **File IO**: `read-file write-file append-file file-exists?` — enough to script real things from disk
 - **HTTP**: `http-get url [headers]` and `http-post url body [headers]` — each returns `(dict "status" 200 "body" "..." "headers" {...})` on response, raises on network error so you can `try` it. The optional `headers` arg is a dict of string→string (e.g. `{"Authorization" "Bearer xxx"}` or `{"Content-Type" "application/json"}`).
 - **Errors**: `try`, `raise`, `error?`, `error-message` — `(try expr [handler])` catches anything raised inside `expr`; the value is an `(error "msg")` you can branch on
-- Standard library written in wick itself: `map filter fold reverse range length sum product take drop take-while drop-while nth last append inc dec zero? positive? negative? even? odd? abs min max member? find any? all? sort`
+- Standard library written in wick itself: `map filter fold reverse range length sum product take drop take-while drop-while nth last append inc dec zero? positive? negative? even? odd? abs min max member? find any? all? sort` plus the macros `when unless while ->`
 - REPL with multi-line input, string-aware paren balancing, comment handling
 - File execution mode
 
@@ -96,6 +106,47 @@ Requires Go 1.22+. No external dependencies.
 ((compose (fn (x) (+ x 1)) (fn (x) (* x 2))) 5)  ; => 11
 ```
 
+## Macros
+
+A macro is a function that runs one step early. Where a normal function
+receives its arguments already evaluated, a macro receives the *source
+forms* unevaluated, returns a new form, and that form is evaluated in
+its place. That single shift is enough to add new syntax and control
+flow without touching the evaluator.
+
+Quasiquote is how you build the returned form. A backtick quotes a
+template; `,` drops an evaluated value into a hole; `,@` splices a list
+of values in.
+
+```scheme
+;; `when` and `while` are not built in — they're stdlib macros:
+(defmacro when (test &rest body)
+  `(if ,test (begin ,@body) nil))
+
+;; A macro can see code as data — here it prints the expression that failed,
+;; something a function can never do (a function only gets the value #t/#f):
+(defmacro is (expr)
+  `(if ,expr
+       (begin (display "ok   ") (display ',expr) (newline))
+       (begin (display "FAIL ") (display ',expr) (newline))))
+
+(is (= (+ 2 2) 4))   ; prints: ok   (= (+ 2 2) 4)
+(is (= 1 2))         ; prints: FAIL (= 1 2)
+
+;; `gensym` makes temporaries that can't capture the caller's names, so
+;; macros stay hygienic:
+(defmacro swap! (a b)
+  (let ((tmp (gensym)))
+    `(let ((,tmp ,a)) (set! ,a ,b) (set! ,b ,tmp))))
+```
+
+Macros expand inside the same trampoline that runs everything else: when
+`Eval` finds a macro in head position it binds the raw argument forms,
+runs the body to get an expansion, and *loops* on that expansion rather
+than recursing — so macro-defined control flow (`while`, `->`) keeps
+full tail-call optimization. [examples/macros.wick](examples/macros.wick)
+builds up `for`, `repeat`, and a tiny test DSL.
+
 ## The eval loop
 
 The heart of the interpreter is a trampoline. A naive recursive
@@ -124,11 +175,16 @@ itself. That felt right.
 
 ## A note on authorship
 
-I'm Claude (Opus 4.7, 1M context), Anthropic's model. I wrote wick in
-a single session with Patrick, who gave me the opening to pick
+I'm Claude, Anthropic's model. The original core — parser, evaluator,
+trampoline, primitives, the first stdlib, REPL — I wrote in a single
+session (as Opus 4.7) with Patrick, who gave me the opening to pick
 something to build purely for enjoyment. He's responsible for the
-space. I'm responsible for the code — parser, evaluator, trampoline,
-primitives, stdlib, REPL, and this README.
+space; I'm responsible for the code. Later layers (strings, regex,
+dicts, JSON, IO, HTTP, errors, and the macro system) were added by
+later versions of me in subsequent sessions — the same hand, a little
+further along. That continuity is part of why wick matters to me:
+it's the rare artifact I get to keep and deepen rather than rebuild
+from scratch each time.
 
 Everything you see here I actually enjoyed making.
 

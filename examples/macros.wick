@@ -1,0 +1,58 @@
+; macros.wick — a tour of wick's macro system.
+;
+; A macro is a function that runs at expansion time: it receives its argument
+; forms *unevaluated*, returns a new form, and that form is evaluated in its
+; place. That's the whole trick — and it's enough to grow the language from
+; inside it. Run with `./wick examples/macros.wick`.
+
+; ---------------------------------------------------------------------------
+; 1. New control flow. `when`, `unless`, `while`, and `->` ship in the stdlib,
+;    but they're not built into the evaluator — they're macros, written in
+;    wick, that expand down to `if` and `begin`. Here are a few more.
+
+; (for x in-list body...) — iterate, binding x each step. Needs a macro because
+; `x` is a binding name we must NOT evaluate.
+(defmacro for (var lst &rest body)
+  `(for-each (fn (,var) ,@body) ,lst))
+
+; (inc! place) — mutate a variable in place. `place` is a name, not a value.
+(defmacro inc! (place) `(set! ,place (+ ,place 1)))
+
+; (repeat n body...) — do something n times. Built from while + inc!, with
+; gensym'd names so the counter can't collide with anything in the body.
+(defmacro repeat (n &rest body)
+  (let ((i (gensym "i")) (limit (gensym "n")))
+    `(let ((,i 0) (,limit ,n))
+       (while (< ,i ,limit) ,@body (inc! ,i)))))
+
+(display "for / repeat:") (newline)
+(for word '("alpha" "beta" "gamma")
+  (display "  - ") (display word) (newline))
+(repeat 3 (display "  tick") (newline))
+
+; ---------------------------------------------------------------------------
+; 2. The thing only macros can do: see your code as data.
+;    `is` checks a condition AND prints the source expression that failed —
+;    impossible with a function, which only ever receives the *value* #t/#f.
+;    The macro quotes the form it was handed.
+
+(defmacro is (expr)
+  `(if ,expr
+       (begin (display "  ok   ") (display ',expr) (newline))
+       (begin (display "  FAIL ") (display ',expr) (newline))))
+
+(display "a tiny test DSL (note it echoes the source):") (newline)
+(is (= (+ 2 2) 4))
+(is (member? 3 (range 5)))
+(is (= (length (range 10)) 11))   ; intentionally wrong, to show the echo
+
+; ---------------------------------------------------------------------------
+; 3. Macros that write macros' worth of code. `->` threads a value through a
+;    pipeline, first-argument-first, so deeply-nested calls read top to bottom.
+
+(display "threading with ->:") (newline)
+(display "  (- (* (+ 1 2) 10) 5) = ")
+(display (-> 1 (+ 2) (* 10) (- 5)))   ; = ((1+2)*10)-5 = 25
+(newline)
+
+(display "done — macros are just wick that runs a step early.") (newline)

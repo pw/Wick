@@ -1,12 +1,18 @@
 // wick — a tiny lisp in a single file.
 //
 // Supports: numbers, strings, booleans, symbols, lists, closures with lexical
-// scope, recursion with tail-call optimization, quote / quasiquote-less quote,
+// scope, recursion with tail-call optimization, variadic params (&rest),
+// quote, quasiquote/unquote/unquote-splicing, hygienic macros (defmacro),
 // and a small stdlib written in wick itself.
 //
-// Special forms: quote ' if cond def set! fn let begin and or try
+// Special forms: quote ' quasiquote ` unquote , unquote-splicing ,@
+//                if cond def set! fn let begin and or try defmacro
+// Reader sugar:  'x → (quote x)   `x → (quasiquote x)
+//                ,x → (unquote x) ,@x → (unquote-splicing x)
+//                [a b] → (list a b)   {"k" v} → (dict "k" v)
+// Params:        (fn (a b) ...) fixed arity; (fn (a &rest more) ...) variadic.
 // Primitives: arithmetic, comparison, cons car cdr list null? pair? eq? not
-//             apply mod string-length string-append number->string string->number
+//             apply mod gensym string-length string-append number->string string->number
 //             string-contains? string-split string-replace substring
 //             string-upcase string-downcase string-trim string-join
 //             re-match? re-find re-find-all re-replace re-split
@@ -20,6 +26,7 @@
 // Stdlib (written in wick): map filter fold for-each reverse range length sum product
 //             take nth drop last append inc dec zero? positive? negative? even? odd?
 //             abs min max member? find any? all? sort
+// Macros (written in wick): when unless while ->
 //
 // Run: `wick` for REPL, `wick file.wick` to execute a file.
 
@@ -104,11 +111,24 @@ func dictKey(v Value) (string, error) {
 
 type Fn struct {
 	params []Sym
+	rest   Sym // "" means fixed arity; otherwise binds leftover args as a list
 	body   List
 	env    *Env
 }
 
 func (f *Fn) String() string { return "#<fn>" }
+
+// A Macro is a function over unevaluated forms: it receives its argument
+// forms verbatim, returns a new form, and that form is then evaluated in the
+// caller's environment. Same shape as Fn — the difference is only when it runs.
+type Macro struct {
+	params []Sym
+	rest   Sym
+	body   List
+	env    *Env
+}
+
+func (m *Macro) String() string { return "#<macro>" }
 
 type Builtin struct {
 	name string
@@ -165,9 +185,17 @@ func tokenize(src string) []string {
 			for i < len(src) && src[i] != '\n' {
 				i++
 			}
-		case c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' || c == '\'':
+		case c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' || c == '\'' || c == '`':
 			toks = append(toks, string(c))
 			i++
+		case c == ',':
+			if i+1 < len(src) && src[i+1] == '@' {
+				toks = append(toks, ",@")
+				i += 2
+			} else {
+				toks = append(toks, ",")
+				i++
+			}
 		case c == '"':
 			j := i + 1
 			for j < len(src) && src[j] != '"' {
@@ -185,7 +213,7 @@ func tokenize(src string) []string {
 			i = j + 1
 		default:
 			j := i
-			for j < len(src) && !strings.ContainsRune(" \t\n\r()[]{}';\"", rune(src[j])) {
+			for j < len(src) && !strings.ContainsRune(" \t\n\r()[]{}';\"`,", rune(src[j])) {
 				j++
 			}
 			toks = append(toks, src[i:j])
@@ -285,6 +313,24 @@ func (r *reader) read() (Value, error) {
 			return nil, err
 		}
 		return List{Sym("quote"), v}, nil
+	case "`":
+		v, err := r.read()
+		if err != nil {
+			return nil, err
+		}
+		return List{Sym("quasiquote"), v}, nil
+	case ",":
+		v, err := r.read()
+		if err != nil {
+			return nil, err
+		}
+		return List{Sym("unquote"), v}, nil
+	case ",@":
+		v, err := r.read()
+		if err != nil {
+			return nil, err
+		}
+		return List{Sym("unquote-splicing"), v}, nil
 	default:
 		return atom(t), nil
 	}
@@ -326,6 +372,120 @@ func ParseAll(src string) ([]Value, error) {
 	}
 }
 
+// ---------- Parameter lists, argument binding, quasiquote ----------
+
+// parseParams reads a parameter list, which may end in `&rest name` to bind
+// any leftover arguments as a list: (a b &rest more). Shared by fn and defmacro.
+func parseParams(plist List) (params []Sym, rest Sym, err error) {
+	for i := 0; i < len(plist); i++ {
+		s, ok := plist[i].(Sym)
+		if !ok {
+			return nil, "", errors.New("params must be symbols")
+		}
+		if s == "&rest" {
+			if i != len(plist)-2 {
+				return nil, "", errors.New("&rest must be followed by exactly one name")
+			}
+			rs, ok := plist[i+1].(Sym)
+			if !ok {
+				return nil, "", errors.New("&rest name must be a symbol")
+			}
+			return params, rs, nil
+		}
+		params = append(params, s)
+	}
+	return params, "", nil
+}
+
+// bindArgs creates a child of defEnv with params bound to args, honouring an
+// optional &rest tail. Used by every call site that applies an Fn or Macro.
+func bindArgs(params []Sym, rest Sym, args []Value, defEnv *Env, what string) (*Env, error) {
+	sub := NewEnv(defEnv)
+	if rest != "" {
+		if len(args) < len(params) {
+			return nil, fmt.Errorf("%s: need at least %d args, got %d", what, len(params), len(args))
+		}
+		for i, p := range params {
+			sub.Set(p, args[i])
+		}
+		sub.Set(rest, append(List{}, args[len(params):]...))
+		return sub, nil
+	}
+	if len(args) != len(params) {
+		return nil, fmt.Errorf("%s: need %d args, got %d", what, len(params), len(args))
+	}
+	for i, p := range params {
+		sub.Set(p, args[i])
+	}
+	return sub, nil
+}
+
+// quasiquote expands a template: literal structure is preserved, (unquote x)
+// holes are evaluated, and (unquote-splicing x) holes are evaluated and spliced
+// into the enclosing list. Nested quasiquotes raise the depth so only the
+// innermost unquotes at depth 1 fire.
+func quasiquote(t Value, env *Env, depth int) (Value, error) {
+	list, ok := t.(List)
+	if !ok {
+		return t, nil // atoms stand for themselves
+	}
+	if len(list) == 2 {
+		if head, ok := list[0].(Sym); ok {
+			switch head {
+			case "unquote":
+				if depth == 1 {
+					return Eval(list[1], env)
+				}
+				inner, err := quasiquote(list[1], env, depth-1)
+				if err != nil {
+					return nil, err
+				}
+				return List{Sym("unquote"), inner}, nil
+			case "quasiquote":
+				inner, err := quasiquote(list[1], env, depth+1)
+				if err != nil {
+					return nil, err
+				}
+				return List{Sym("quasiquote"), inner}, nil
+			}
+		}
+	}
+	out := List{}
+	for _, el := range list {
+		if sub, ok := el.(List); ok && len(sub) == 2 {
+			if head, ok := sub[0].(Sym); ok && head == "unquote-splicing" {
+				if depth == 1 {
+					spliced, err := Eval(sub[1], env)
+					if err != nil {
+						return nil, err
+					}
+					switch s := spliced.(type) {
+					case List:
+						out = append(out, s...)
+					case Nil:
+						// splices nothing
+					default:
+						return nil, fmt.Errorf("unquote-splicing: not a list: %s", spliced)
+					}
+					continue
+				}
+				inner, err := quasiquote(sub[1], env, depth-1)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, List{Sym("unquote-splicing"), inner})
+				continue
+			}
+		}
+		q, err := quasiquote(el, env, depth)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, q)
+	}
+	return out, nil
+}
+
 // ---------- Evaluator (trampoline-style for TCO) ----------
 
 func Eval(v Value, env *Env) (Value, error) {
@@ -346,6 +506,15 @@ func Eval(v Value, env *Env) (Value, error) {
 						return nil, errors.New("quote: need 1 arg")
 					}
 					return x[1], nil
+				case "quasiquote":
+					if len(x) != 2 {
+						return nil, errors.New("quasiquote: need 1 arg")
+					}
+					return quasiquote(x[1], env, 1)
+				case "unquote":
+					return nil, errors.New("unquote outside quasiquote")
+				case "unquote-splicing":
+					return nil, errors.New("unquote-splicing outside quasiquote")
 				case "if":
 					if len(x) < 3 || len(x) > 4 {
 						return nil, errors.New("if: need 2 or 3 args")
@@ -437,15 +606,30 @@ func Eval(v Value, env *Env) (Value, error) {
 					if !ok {
 						return nil, errors.New("fn: params must be list")
 					}
-					params := make([]Sym, len(plist))
-					for i, p := range plist {
-						s, ok := p.(Sym)
-						if !ok {
-							return nil, errors.New("fn: params must be symbols")
-						}
-						params[i] = s
+					params, rest, perr := parseParams(plist)
+					if perr != nil {
+						return nil, fmt.Errorf("fn: %v", perr)
 					}
-					return &Fn{params: params, body: List(x[2:]), env: env}, nil
+					return &Fn{params: params, rest: rest, body: List(x[2:]), env: env}, nil
+				case "defmacro":
+					if len(x) < 4 {
+						return nil, errors.New("defmacro: need name + params + body")
+					}
+					name, ok := x[1].(Sym)
+					if !ok {
+						return nil, errors.New("defmacro: name must be a symbol")
+					}
+					plist, ok := x[2].(List)
+					if !ok {
+						return nil, errors.New("defmacro: params must be a list")
+					}
+					params, rest, perr := parseParams(plist)
+					if perr != nil {
+						return nil, fmt.Errorf("defmacro: %v", perr)
+					}
+					m := &Macro{params: params, rest: rest, body: List(x[3:]), env: env}
+					env.Set(name, m)
+					return m, nil
 				case "let":
 					if len(x) < 3 {
 						return nil, errors.New("let: need bindings + body")
@@ -535,11 +719,10 @@ func Eval(v Value, env *Env) (Value, error) {
 					case *Builtin:
 						return h.f([]Value{errVal})
 					case *Fn:
-						if len(h.params) != 1 {
-							return nil, fmt.Errorf("try: handler must take 1 arg, got %d", len(h.params))
+						sub, err := bindArgs(h.params, h.rest, []Value{errVal}, h.env, "try handler")
+						if err != nil {
+							return nil, err
 						}
-						sub := NewEnv(h.env)
-						sub.Set(h.params[0], errVal)
 						for i := 0; i < len(h.body)-1; i++ {
 							if _, err := Eval(h.body[i], sub); err != nil {
 								return nil, err
@@ -553,10 +736,27 @@ func Eval(v Value, env *Env) (Value, error) {
 					}
 				}
 			}
-			// function application
+			// macro or function application
 			fn, err := Eval(x[0], env)
 			if err != nil {
 				return nil, err
+			}
+			// A macro receives its argument forms unevaluated, runs to produce
+			// a new form, and we loop to evaluate that form in place (keeps TCO).
+			if mac, ok := fn.(*Macro); ok {
+				sub, err := bindArgs(mac.params, mac.rest, []Value(x[1:]), mac.env, "macro")
+				if err != nil {
+					return nil, err
+				}
+				var expansion Value = Nil{}
+				for _, b := range mac.body {
+					expansion, err = Eval(b, sub)
+					if err != nil {
+						return nil, err
+					}
+				}
+				v = expansion
+				continue
 			}
 			args := make([]Value, len(x)-1)
 			for i, a := range x[1:] {
@@ -569,12 +769,9 @@ func Eval(v Value, env *Env) (Value, error) {
 			case *Builtin:
 				return f.f(args)
 			case *Fn:
-				if len(args) != len(f.params) {
-					return nil, fmt.Errorf("arity: need %d, got %d", len(f.params), len(args))
-				}
-				sub := NewEnv(f.env)
-				for i, p := range f.params {
-					sub.Set(p, args[i])
+				sub, err := bindArgs(f.params, f.rest, args, f.env, "arity")
+				if err != nil {
+					return nil, err
 				}
 				for i := 0; i < len(f.body)-1; i++ {
 					if _, err := Eval(f.body[i], sub); err != nil {
@@ -872,12 +1069,9 @@ func defaultEnv() *Env {
 		case *Builtin:
 			return f.f(callArgs)
 		case *Fn:
-			if len(callArgs) != len(f.params) {
-				return nil, fmt.Errorf("arity: need %d, got %d", len(f.params), len(callArgs))
-			}
-			sub := NewEnv(f.env)
-			for i, p := range f.params {
-				sub.Set(p, callArgs[i])
+			sub, err := bindArgs(f.params, f.rest, callArgs, f.env, "arity")
+			if err != nil {
+				return nil, err
 			}
 			var last Value = Nil{}
 			for _, b := range f.body {
@@ -891,6 +1085,20 @@ func defaultEnv() *Env {
 		default:
 			return nil, fmt.Errorf("apply: not callable: %s", fn)
 		}
+	}})
+	gensymCounter := 0
+	env.Set("gensym", &Builtin{name: "gensym", f: func(args []Value) (Value, error) {
+		gensymCounter++
+		prefix := "g"
+		if len(args) == 1 {
+			switch p := args[0].(type) {
+			case Str:
+				prefix = string(p)
+			case Sym:
+				prefix = string(p)
+			}
+		}
+		return Sym(fmt.Sprintf("__%s%d", prefix, gensymCounter)), nil
 	}})
 	env.Set("string-length", &Builtin{name: "string-length", f: func(args []Value) (Value, error) {
 		if len(args) != 1 {
@@ -1733,6 +1941,42 @@ const stdlib = `
 (def for-each (fn (f xs)
   (if (null? xs) nil
       (begin (f (car xs)) (for-each f (cdr xs))))))
+
+; ---- macros (written in wick, using quasiquote + &rest) ----
+; Note: in a real .wick file you'd write the quasiquote/unquote reader sugar.
+; Here in the embedded stdlib we spell out the special forms they desugar to,
+; because the stdlib is itself a Go raw string. The two are exactly equivalent.
+
+; (when test body...) -- run the body only if test is truthy.
+(defmacro when (test &rest body)
+  (quasiquote (if (unquote test) (begin (unquote-splicing body)) nil)))
+
+; (unless test body...) -- the mirror of when.
+(defmacro unless (test &rest body)
+  (quasiquote (if (unquote test) nil (begin (unquote-splicing body)))))
+
+; (while test body...) -- loop while test holds. Expands to a tail-recursive
+; local function whose name is a gensym, so it can't shadow anything you wrote.
+(defmacro while (test &rest body)
+  (let ((loop (gensym "while")))
+    (quasiquote
+      (begin
+        (def (unquote loop)
+          (fn () (if (unquote test)
+                     (begin (unquote-splicing body) ((unquote loop)))
+                     nil)))
+        ((unquote loop))))))
+
+; (-> x f (g a) ...) -- thread x through each form's first argument position:
+; (-> 3 inc (- 10)) ==> (- (inc 3) 10). Bare symbols become single-arg calls.
+(defmacro -> (x &rest forms)
+  (if (null? forms)
+      x
+      (let ((form (car forms)))
+        (let ((step (if (pair? form)
+                        (quasiquote ((unquote (car form)) (unquote x) (unquote-splicing (cdr form))))
+                        (list form x))))
+          (quasiquote (-> (unquote step) (unquote-splicing (cdr forms))))))))
 `
 
 // ---------- REPL ----------
