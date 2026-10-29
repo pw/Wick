@@ -1,0 +1,184 @@
+;; candle.wick — the first picture wick ever drew: a wick.
+;;
+;; Every pixel is asked one question — how much light reaches you, and what
+;; colour is it? — and answers by adding up what it can see: the dark room,
+;; the glow thrown by the flame, the flame itself, the wick, the wax.
+;; Writes a PPM (P3, plain text) you can open or convert:
+;;   ./wick examples/candle.wick && convert candle.ppm candle.png
+
+(def W 600)
+(def H 900)
+
+;; ---- small tools -----------------------------------------------------------
+
+(def clamp (fn (x lo hi) (if (< x lo) lo (if (> x hi) hi x))))
+(def mix   (fn (a b t) (+ a (* (- b a) t))))
+(def sq    (fn (x) (* x x)))
+(def fract (fn (x) (- x (floor x))))
+
+;; smooth 0→1 as x crosses from edge0 to edge1 (works in either direction)
+(def smooth (fn (edge0 edge1 x)
+  (def t (clamp (/ (- x edge0) (- edge1 edge0)) 0 1))
+  (* t t (- 3 (* 2 t)))))
+
+;; a deterministic "random" number for a pixel, for film grain
+(def hash (fn (x y) (fract (* (sin (+ (* x 12.9898) (* y 78.233))) 43758.5453))))
+
+;; colours are three-element lists; these do arithmetic on them
+(def rgb  (fn (r g b) (list r g b)))
+(def add  (fn (a b) (list (+ (car a) (car b)) (+ (nth 1 a) (nth 1 b)) (+ (nth 2 a) (nth 2 b)))))
+(def mul  (fn (c k) (list (* (car c) k) (* (nth 1 c) k) (* (nth 2 c) k))))
+(def tint (fn (c d) (list (* (car c) (car d)) (* (nth 1 c) (nth 1 d)) (* (nth 2 c) (nth 2 d)))))
+(def lerp (fn (a b t) (list (mix (car a) (car b) t) (mix (nth 1 a) (nth 1 b) t) (mix (nth 2 a) (nth 2 b) t))))
+
+(def black (rgb 0 0 0))
+
+;; ---- the scene, in units where the picture is 2 tall --------------------
+
+(def flame-base 0.08)    ; where the flame starts (just above the wick root)
+(def flame-height 0.62)
+(def flame-width 0.085)  ; widest half-width
+(def candle-top -0.06)   ; centre of the wax's top face
+(def candle-half 0.30)
+(def ellipse 0.055)      ; how much of the top face we see from slightly above
+(def light-y 0.30)       ; the flame's optical centre, for lighting the wax
+
+;; The flame leans and wavers a little: a slow S down its height.
+(def bend (fn (t) (* 0.018 t t (sin (+ 1.3 (* 4.2 t))))))
+
+;; half-width of the flame at height t ∈ [0,1]: round below, a point above
+(def flame-w (fn (t)
+  (* flame-width 1.9 (expt t 0.42) (expt (- 1 t) 1.15))))
+
+;; How much the flame shines at (x, y), and what colour.
+(def flame (fn (x y)
+  (def t (/ (- y flame-base) flame-height))
+  (if (or (< t -0.08) (> t 1.0))
+      black
+      (begin
+        (def tt (clamp t 0.001 0.999))
+        (def w (flame-w tt))
+        (def q (/ (abs (- x (bend tt))) w))           ; 0 on the axis, 1 at the edge
+        (def body (* (smooth 1.15 0.55 q)              ; soft edge, not a cut-out
+                     (smooth -0.08 0.06 t)))           ; rounded bottom
+        ;; the blue skirt at the root, strongest at the outer edge
+        (def blue (* (smooth 0.30 0.0 t) (smooth 0.2 0.85 q) (smooth 1.2 0.8 q)))
+        ;; the darker vapour cone wrapped round the wick, low in the flame
+        (def vapour (* (smooth 0.42 0.05 t) (smooth 0.55 0.0 q)))
+        ;; the luminous zone: hottest a third of the way up, near the axis
+        (def heat (* (exp (- (sq (/ (- tt 0.36) 0.30)))) (smooth 0.95 0.0 q)))
+        (def core (lerp (rgb 1.0 0.50 0.12) (rgb 1.0 0.93 0.74) (clamp (* heat 1.25) 0 1)))
+        (def lit  (mul core (* body (+ 0.28 (* 1.5 heat)) (- 1 (* 0.70 vapour)))))
+        (add lit (mul (rgb 0.12 0.24 1.0) (* 0.9 blue)))))))
+
+;; The glow the flame throws on the dark: falls off like a lamp in fog.
+(def glow (fn (x y)
+  (def d2 (+ (sq x) (sq (* 0.8 (- y light-y)))))
+  (mul (rgb 1.0 0.46 0.14) (* (+ (/ 0.016 (+ d2 0.010)) 0.012) (exp (* -1.9 d2))))))
+
+;; The wick: a dark thread rising from the wax, curling over at the top,
+;; with an ember where it pokes out of the flame.
+(def wick-x (fn (y) (* 0.042 (expt (clamp (/ (- y 0.03) 0.16) 0 1) 2.5))))
+(def wick (fn (x y)
+  (if (or (< y (- candle-top 0.01)) (> y 0.19))
+      nil
+      (begin
+        (def d (abs (- x (wick-x y))))
+        (def a (smooth 0.0085 0.004 d))
+        (if (< a 0.01) nil
+            (begin
+              (def ember (smooth 0.13 0.185 y))
+              (list a (add (mul (rgb 0.05 0.03 0.02) (- 1 ember))
+                           (mul (rgb 1.4 0.35 0.06) ember)))))))))
+
+;; Light from the flame landing on wax at height y (inverse-square, softened).
+(def flame-light (fn (x y)
+  (/ 0.05 (sq (+ (sq x) (sq (- y light-y)) 0.12)))))
+
+(def wax (rgb 0.95 0.88 0.78))
+
+;; The candle body: a cylinder lit from above and inside.
+(def body (fn (x y)
+  (def u (/ x candle-half))
+  (def front (- candle-top (* ellipse (sqrt (clamp (- 1 (* u u)) 0 1)))))
+  (def ny (sqrt (clamp (- 1 (* u u)) 0 1)))            ; how much the surface faces us
+  (def facing (+ 0.10 (* 0.90 (expt ny 1.6))))
+  ;; wax is translucent: just under the rim it glows from the flame inside
+  (def depth (- front y))
+  (def sss (+ (* 0.75 (exp (/ (- depth) 0.07))) (* 0.06 (exp (/ (- depth) 0.22)))))
+  (def shade (* facing (flame-light x y)))
+  (add (mul (tint wax (rgb 1.0 0.62 0.34)) (* 0.30 shade (+ 0.55 (* 0.45 (smooth -0.6 0.6 u)))))
+       (mul (rgb 1.0 0.50 0.20) (* sss (+ 0.25 (* 0.75 ny)))))))
+
+;; The top face: a shallow pool of melted wax, brightest by the wick.
+(def top (fn (x y)
+  (def r2 (+ (sq (/ x candle-half)) (sq (/ (- y candle-top) ellipse))))
+  (def pool (smooth 0.85 0.0 r2))
+  (def rim (* (smooth 0.6 0.98 r2) (smooth 0 1 (/ (- y candle-top) ellipse)))) ; the far rim, lit
+  (add (mul (rgb 1.0 0.58 0.24) (+ 0.30 (* 0.8 pool)))
+       (mul (rgb 1.0 0.74 0.45) (* 0.45 rim)))))
+
+;; One drip of wax that ran over the lip and stopped, bulging past the edge.
+;; Returns how lit the drip is at (x, y) relative to the wax behind it, or nil.
+(def drip-x (* 0.94 candle-half))
+(def drip-bottom -0.31)
+(def drip (fn (x y)
+  (def along (smooth (- candle-top 0.02) drip-bottom y))     ; 0 at the lip, 1 at the end
+  (def hw (+ 0.010 (* 0.009 along)))
+  (def bulb (sqrt (+ (sq (- x drip-x)) (sq (* 0.9 (- y drip-bottom))))))
+  (def in-run (and (< (abs (- x drip-x)) hw) (> y drip-bottom) (< y (- candle-top 0.015))))
+  (def in-bulb (< bulb 0.022))
+  (if (or in-run in-bulb)
+      (begin
+        (def s (/ (- x drip-x) (if in-bulb 0.022 hw)))        ; -1 left edge .. 1 right edge
+        (+ 0.80 (* 1.1 (smooth 0.3 -0.7 s)) (* -0.45 (smooth 0.4 1.0 s))))
+      nil)))
+
+;; Which surface is at (x, y), and what does it show?
+(def wax-at (fn (x y)
+  (def u (/ x candle-half))
+  (def d (drip x y))
+  (if (>= (abs u) 1)
+      (if (null? d) nil (mul (body (* 0.97 candle-half) y) d))
+      (begin
+        (def arc (* ellipse (sqrt (- 1 (* u u)))))
+        (cond
+          ((< y (- candle-top arc)) (if (null? d) (body x y) (mul (body x y) d)))
+          ((< y (+ candle-top arc)) (top x y))
+          (else nil))))))
+
+;; ---- one pixel -------------------------------------------------------------
+
+(def tone (fn (v) (expt (- 1 (exp (* -1.35 v))) (/ 1 2.2))))   ; film-ish, then gamma
+
+(def radiance (fn (sx sy)
+  (def x (/ (- sx (/ W 2)) (/ H 2)))
+  (def y (- 1.05 (/ sy (/ H 2))))
+  (def surface (wax-at x y))
+  (def base (if (null? surface) (add (rgb 0.0006 0.0004 0.0004) (glow x y)) surface))
+  (def w (wick x y))
+  (def under (if (null? w) base (lerp base (nth 1 w) (car w))))
+  (add under (flame x y))))
+
+;; Four looks per pixel, averaged, so edges are soft rather than stair-stepped.
+(def pixel (fn (px py)
+  (def c (mul (add (add (radiance (+ px 0.25) (+ py 0.25)) (radiance (+ px 0.75) (+ py 0.25)))
+                   (add (radiance (+ px 0.25) (+ py 0.75)) (radiance (+ px 0.75) (+ py 0.75))))
+              0.25))
+  (def grain (* 0.010 (- (hash px py) 0.5)))
+  (map (fn (v) (clamp (round (* 255 (+ (tone v) grain))) 0 255)) c)))
+
+;; ---- write it out, one row at a time -------------------------------------
+
+(def out "candle.ppm")
+(write-file out (string-append "P3\n" (number->string W) " " (number->string H) "\n255\n"))
+
+(def row (fn (py)
+  (def cols (fn (px acc)
+    (if (< px 0) acc
+        (cols (- px 1) (append (map number->string (pixel px py)) acc)))))
+  (append-file out (string-append (string-join (cols (- W 1) '()) " ") "\n"))))
+
+(def rows (fn (py) (when (< py H) (row py) (rows (+ py 1)))))
+(rows 0)
+(print "wrote" out)

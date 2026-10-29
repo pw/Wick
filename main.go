@@ -38,6 +38,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -140,6 +141,20 @@ func (b *Builtin) String() string { return "#<builtin " + b.name + ">" }
 type Err struct{ msg string }
 
 func (e *Err) String() string { return "(error " + strconv.Quote(e.msg) + ")" }
+
+// A Vec is the one mutable thing in wick: a fixed-length box of slots you can
+// overwrite in place. Lists stay immutable; reach for a vector only when an
+// algorithm genuinely needs to write to the same place many times (a pixel
+// buffer, a histogram, a sieve).
+type Vec struct{ items []Value }
+
+func (v *Vec) String() string {
+	parts := make([]string, len(v.items))
+	for i, x := range v.items {
+		parts[i] = x.String()
+	}
+	return "#[" + strings.Join(parts, " ") + "]"
+}
 
 // ---------- Environment ----------
 
@@ -954,6 +969,119 @@ func defaultEnv() *Env {
 			return nil, errors.New("mod: div by zero")
 		}
 		return Num(float64(ai % bi)), nil
+	}})
+
+	// Math. One-argument functions share a shape, so they share a constructor.
+	unary := func(name string, op func(float64) float64) *Builtin {
+		return &Builtin{name: name, f: func(args []Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("%s: need 1 arg", name)
+			}
+			a, ok := args[0].(Num)
+			if !ok {
+				return nil, fmt.Errorf("%s: need number, got %s", name, args[0])
+			}
+			return Num(op(float64(a))), nil
+		}}
+	}
+	env.Set("sqrt", unary("sqrt", math.Sqrt))
+	env.Set("sin", unary("sin", math.Sin))
+	env.Set("cos", unary("cos", math.Cos))
+	env.Set("exp", unary("exp", math.Exp))
+	env.Set("log", unary("log", math.Log))
+	env.Set("floor", unary("floor", math.Floor))
+	env.Set("round", unary("round", math.Round))
+	env.Set("pi", Num(math.Pi))
+	binary := func(name string, op func(a, b float64) float64) *Builtin {
+		return &Builtin{name: name, f: func(args []Value) (Value, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("%s: need 2 args", name)
+			}
+			a, ok1 := args[0].(Num)
+			b, ok2 := args[1].(Num)
+			if !ok1 || !ok2 {
+				return nil, fmt.Errorf("%s: need numbers", name)
+			}
+			return Num(op(float64(a), float64(b))), nil
+		}}
+	}
+	env.Set("atan2", binary("atan2", math.Atan2))
+	env.Set("expt", binary("expt", math.Pow))
+
+	// Vectors: make, read, write, measure, and let go of (as a list).
+	vecIndex := func(name string, args []Value, n int) (*Vec, int, error) {
+		if len(args) != n {
+			return nil, 0, fmt.Errorf("%s: need %d args", name, n)
+		}
+		v, ok := args[0].(*Vec)
+		if !ok {
+			return nil, 0, fmt.Errorf("%s: need vector, got %s", name, args[0])
+		}
+		i, ok := args[1].(Num)
+		if !ok || float64(i) != float64(int(i)) || int(i) < 0 || int(i) >= len(v.items) {
+			return nil, 0, fmt.Errorf("%s: index %s out of range for length %d", name, args[1], len(v.items))
+		}
+		return v, int(i), nil
+	}
+	env.Set("make-vector", &Builtin{name: "make-vector", f: func(args []Value) (Value, error) {
+		if len(args) < 1 || len(args) > 2 {
+			return nil, errors.New("make-vector: (make-vector n [fill])")
+		}
+		n, ok := args[0].(Num)
+		if !ok || n < 0 {
+			return nil, errors.New("make-vector: need a non-negative length")
+		}
+		var fill Value = Nil{}
+		if len(args) == 2 {
+			fill = args[1]
+		}
+		items := make([]Value, int(n))
+		for i := range items {
+			items[i] = fill
+		}
+		return &Vec{items: items}, nil
+	}})
+	env.Set("vector-ref", &Builtin{name: "vector-ref", f: func(args []Value) (Value, error) {
+		v, i, err := vecIndex("vector-ref", args, 2)
+		if err != nil {
+			return nil, err
+		}
+		return v.items[i], nil
+	}})
+	env.Set("vector-set!", &Builtin{name: "vector-set!", f: func(args []Value) (Value, error) {
+		v, i, err := vecIndex("vector-set!", args, 3)
+		if err != nil {
+			return nil, err
+		}
+		v.items[i] = args[2]
+		return args[2], nil
+	}})
+	env.Set("vector-length", &Builtin{name: "vector-length", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("vector-length: need 1 arg")
+		}
+		v, ok := args[0].(*Vec)
+		if !ok {
+			return nil, errors.New("vector-length: need vector")
+		}
+		return Num(len(v.items)), nil
+	}})
+	env.Set("vector?", &Builtin{name: "vector?", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("vector?: need 1 arg")
+		}
+		_, ok := args[0].(*Vec)
+		return Bool(ok), nil
+	}})
+	env.Set("vector->list", &Builtin{name: "vector->list", f: func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, errors.New("vector->list: need 1 arg")
+		}
+		v, ok := args[0].(*Vec)
+		if !ok {
+			return nil, errors.New("vector->list: need vector")
+		}
+		return List(append([]Value{}, v.items...)), nil
 	}})
 
 	env.Set("list", &Builtin{name: "list", f: func(args []Value) (Value, error) {
@@ -1837,6 +1965,9 @@ func equals(a, b Value) bool {
 			}
 		}
 		return true
+	case *Vec:
+		y, ok := b.(*Vec)
+		return ok && x == y
 	case *Dict:
 		y, ok := b.(*Dict)
 		if !ok || len(x.m) != len(y.m) {

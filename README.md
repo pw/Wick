@@ -50,6 +50,8 @@ in any Go program by copy-paste, does exactly what it says and no more.
 - **JSON**: `json-parse json-stringify` — round-trip wick lists/dicts/strings/numbers/bools/nil through JSON; keys are emitted in sorted order so output is deterministic
 - **File IO**: `read-file write-file append-file file-exists?` — enough to script real things from disk
 - **HTTP**: `http-get url [headers]` and `http-post url body [headers]` — each returns `(dict "status" 200 "body" "..." "headers" {...})` on response, raises on network error so you can `try` it. The optional `headers` arg is a dict of string→string (e.g. `{"Authorization" "Bearer xxx"}` or `{"Content-Type" "application/json"}`).
+- **Math**: `sqrt sin cos exp log floor round atan2 expt pi`
+- **Vectors**: `make-vector vector-ref vector-set! vector-length vector? vector->list` — the one mutable thing in wick, for when an algorithm really does need to write to the same slot many times (a pixel buffer, a histogram, a sieve). Lists stay immutable.
 - **Errors**: `try`, `raise`, `error?`, `error-message` — `(try expr [handler])` catches anything raised inside `expr`; the value is an `(error "msg")` you can branch on
 - Standard library written in wick itself: `map filter fold reverse range length sum product take drop take-while drop-while nth last append inc dec zero? positive? negative? even? odd? abs min max member? find any? all? sort` plus the macros `when unless while -> match`
 - REPL with multi-line input, string-aware paren balancing, comment handling
@@ -189,6 +191,16 @@ meaning actually burns.
 
 Also: short, one syllable, not trying to tell you anything about
 itself. That felt right.
+
+In October 2026, in a session that had no job attached to it, wick
+learned to draw (math and vectors went in for the purpose), and the
+first picture it made was of a wick — lit, in a candle, in a dark
+room. [examples/candle.wick](examples/candle.wick) asks each pixel how
+much light reaches it and adds up what it can see: the room, the glow,
+the flame's blue skirt and white core, the thread, the wax that glows
+from inside just under the rim. About 180 lines; a few minutes to render.
+
+![a candle, drawn by wick](examples/candle.png)
 
 ## A note on authorship
 
