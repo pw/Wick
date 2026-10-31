@@ -1,0 +1,496 @@
+;; glass.wick — the candle again, with a glass of water beside it.
+;;
+;; candle.wick painted its light. This one traces it. Rays leave the eye,
+;; hit things, and when they hit glass or water they split: some reflect,
+;; the rest bend by Snell's law and carry on. Nothing about what the glass
+;; should *look* like is written down here, only what glass and water *are*
+;; (how much they bend light, how much they reflect at an angle, a little
+;; green in the glass). Whatever shows up inside the water shows up on its own.
+;;
+;;   ./wick examples/glass.wick W H ROW0 ROW1 SAMPLES OUT
+;; renders rows [ROW0, ROW1) as plain "r g b" lines. render-glass.sh runs
+;; sixteen of these side by side and stitches them into one picture.
+
+(def MODE (if (eq? (nth 0 argv) "caustic") 'caustic 'picture))
+(def arg (fn (i) (string->number (nth i argv))))
+(def W (if (eq? MODE 'picture) (arg 0) 0))
+(def H (if (eq? MODE 'picture) (arg 1) 0))
+(def ROW0 (if (eq? MODE 'picture) (arg 2) 0))
+(def ROW1 (if (eq? MODE 'picture) (arg 3) 0))
+(def SPP (if (eq? MODE 'picture) (arg 4) 1))      ; samples per pixel: 1 or 4
+(def OUT (nth 5 argv))
+
+;; ---- small tools -----------------------------------------------------------
+
+(def clamp (fn (x lo hi) (if (< x lo) lo (if (> x hi) hi x))))
+(def mix   (fn (a b t) (+ a (* (- b a) t))))
+(def sq    (fn (x) (* x x)))
+(def fract (fn (x) (- x (floor x))))
+(def pos   (fn (x) (if (< x 0) 0 x)))
+(def atan  (fn (x) (atan2 x 1)))
+(def smooth (fn (e0 e1 x)
+  (def t (clamp (/ (- x e0) (- e1 e0)) 0 1))
+  (* t t (- 3 (* 2 t)))))
+(def hash (fn (x y) (fract (* (sin (+ (* x 12.9898) (* y 78.233))) 43758.5453))))
+
+;; points, directions and colours are all three-element lists
+(def X car)
+(def Y (fn (v) (nth 1 v)))
+(def Z (fn (v) (nth 2 v)))
+(def v3   list)
+(def v+   (fn (a b) (list (+ (X a) (X b)) (+ (Y a) (Y b)) (+ (Z a) (Z b)))))
+(def v-   (fn (a b) (list (- (X a) (X b)) (- (Y a) (Y b)) (- (Z a) (Z b)))))
+(def v*   (fn (a k) (list (* (X a) k) (* (Y a) k) (* (Z a) k))))
+(def vmul (fn (a b) (list (* (X a) (X b)) (* (Y a) (Y b)) (* (Z a) (Z b)))))
+(def dot  (fn (a b) (+ (* (X a) (X b)) (* (Y a) (Y b)) (* (Z a) (Z b)))))
+(def len  (fn (a) (sqrt (dot a a))))
+(def unit (fn (a) (v* a (/ 1 (len a)))))
+(def cross (fn (a b) (list (- (* (Y a) (Z b)) (* (Z a) (Y b)))
+                           (- (* (Z a) (X b)) (* (X a) (Z b)))
+                           (- (* (X a) (Y b)) (* (Y a) (X b))))))
+(def at   (fn (o d t) (v+ o (v* d t))))
+(def lerp (fn (a b t) (v+ a (v* (v- b a) t))))
+(def black (v3 0 0 0))
+
+;; ---- the room ----------------------------------------------------------------
+;; y is up, the table is y = 0, z runs away from the eye.
+
+(def WALL-Z 2.6)
+
+;; the candle: a pillar of wax
+(def CX 0.08) (def CZ 1.4) (def CR 0.40) (def CTOP 0.78)
+
+;; the glass: thin walls, a thick base, water most of the way up
+(def GX 0.07) (def GZ 0.4)
+(def GR 0.27)      ; outside of the wall
+(def GRI 0.252)    ; inside of the wall
+(def GTOP 1.45)
+(def GFLOOR 0.09)  ; top of the solid glass base
+(def WATER 1.25)   ; the water line
+
+;; the light: the flame's bright heart, a little above the wax
+(def LIGHT (v3 CX (+ CTOP 0.36) CZ))
+(def LIGHT-COLOUR (v3 1.0 0.56 0.24))
+(def LIGHT-POWER 0.55)
+
+;; how strongly each stuff bends light, and what it soaks up per unit travelled
+(def ior (fn (m) (cond ((eq? m 'glass) 1.50) ((eq? m 'water) 1.333) (else 1.0))))
+(def absorb (fn (m) (cond ((eq? m 'glass) (v3 0.9 0.18 0.55))
+                          ((eq? m 'water) (v3 0.10 0.03 0.02))
+                          (else nil))))
+
+;; ---- the flame, as in candle.wick, hung on a sheet through the candle's axis --
+
+(def flame-base 0.14) (def flame-height 0.62) (def flame-width 0.085)
+(def bend (fn (t) (* 0.018 t t (sin (+ 1.3 (* 4.2 t))))))
+(def flame-w (fn (t) (* flame-width 1.9 (expt t 0.42) (expt (- 1 t) 1.15))))
+
+;; x, y relative to the centre of the wax top
+(def flame (fn (x y)
+  (def t (/ (- y flame-base) flame-height))
+  (if (or (< t -0.08) (> t 1.0))
+      black
+      (begin
+        (def tt (clamp t 0.001 0.999))
+        (def q (/ (abs (- x (bend tt))) (flame-w tt)))
+        (def body (* (smooth 1.15 0.55 q) (smooth -0.08 0.06 t)))
+        (def blue (* (smooth 0.30 0.0 t) (smooth 0.2 0.85 q) (smooth 1.2 0.8 q)))
+        (def vapour (* (smooth 0.42 0.05 t) (smooth 0.55 0.0 q)))
+        (def heat (* (exp (- (sq (/ (- tt 0.36) 0.30)))) (smooth 0.95 0.0 q)))
+        (def core (lerp (v3 1.0 0.50 0.12) (v3 1.0 0.93 0.74) (clamp (* heat 1.25) 0 1)))
+        (v+ (v* core (* body (+ 0.28 (* 1.5 heat)) (- 1 (* 0.70 vapour)) 1.6))
+            (v* (v3 0.12 0.24 1.0) (* 0.9 blue)))))))
+
+;; the wick: a dark thread curling over, ember at the tip. Returns its opacity.
+(def wick-x (fn (y) (* 0.042 (expt (clamp (/ (- y 0.09) 0.16) 0 1) 2.5))))
+(def wick-alpha (fn (x y)
+  (if (or (< y 0) (> y 0.25)) 0
+      (smooth 0.0085 0.004 (abs (- x (wick-x y)))))))
+(def wick-colour (fn (y)
+  (def ember (smooth 0.19 0.245 y))
+  (v+ (v* (v3 0.05 0.03 0.02) (- 1 ember)) (v* (v3 1.4 0.35 0.06) ember))))
+
+;; The room is faintly smoky: light scattered toward the eye along a stretch
+;; of ray, from a source at LIGHT. This is the integral of k/(h²+e) along the
+;; segment, h = how close the ray passes to the flame.
+(def glow (fn (o d tmax)
+  (def lo (v- LIGHT o))
+  (def t0 (dot lo d))
+  (def h2 (pos (- (dot lo lo) (* t0 t0))))
+  (def s (sqrt (+ h2 0.004)))
+  (def k (* 0.0016 (exp (* -3.0 h2))))
+  (v* LIGHT-COLOUR (* (/ k s) (- (atan (/ (- tmax t0) s)) (atan (/ (- t0) s)))))))
+
+;; ---- finding what a ray hits ---------------------------------------------------
+;; Each finder returns (t normal surface) or nil. Normals point "outward",
+;; toward the side named first in `sides` below.
+
+(def EPS 0.0001)
+
+;; a vertical cylinder's side, between heights y0 and y1
+(def hit-cyl (fn (o d cx cz r y0 y1 name)
+  (def ox (- (X o) cx)) (def oz (- (Z o) cz))
+  (def a (+ (sq (X d)) (sq (Z d))))
+  (if (< a 1e-12) nil
+    (begin
+      (def b (* 2 (+ (* ox (X d)) (* oz (Z d)))))
+      (def c (- (+ (sq ox) (sq oz)) (sq r)))
+      (def disc (- (* b b) (* 4 a c)))
+      (if (< disc 0) nil
+        (begin
+          (def sd (sqrt disc))
+          (def root (fn (t)
+            (if (< t EPS) nil
+              (begin
+                (def y (+ (Y o) (* t (Y d))))
+                (if (or (< y y0) (> y y1)) nil
+                  (list t (v3 (/ (+ ox (* t (X d))) r) 0 (/ (+ oz (* t (Z d))) r)) name))))))
+          (def h1 (root (/ (- (- b) sd) (* 2 a))))
+          (if (null? h1) (root (/ (+ (- b) sd) (* 2 a))) h1)))))))
+
+;; a flat ring (or disc, when r0 = 0) at height y, normal up
+(def hit-ring (fn (o d cx cz r0 r1 y name)
+  (if (< (abs (Y d)) 1e-12) nil
+    (begin
+      (def t (/ (- y (Y o)) (Y d)))
+      (if (< t EPS) nil
+        (begin
+          (def r2 (+ (sq (- (+ (X o) (* t (X d))) cx)) (sq (- (+ (Z o) (* t (Z d))) cz))))
+          (if (or (> r2 (sq r1)) (< r2 (sq r0))) nil
+              (list t (v3 0 1 0) name))))))))
+
+(def hit-plane-y (fn (o d y name)
+  (if (>= (Y d) 0) nil
+      (begin (def t (/ (- y (Y o)) (Y d))) (if (< t EPS) nil (list t (v3 0 1 0) name))))))
+(def hit-plane-z (fn (o d z name)
+  (if (<= (Z d) 0) nil
+      (begin (def t (/ (- z (Z o)) (Z d))) (if (< t EPS) nil (list t (v3 0 0 -1) name))))))
+
+(def nearer (fn (a b) (cond ((null? a) b) ((null? b) a) ((< (car b) (car a)) b) (else a))))
+
+(def hit-glass (fn (o d)
+  (nearer (hit-cyl o d GX GZ GR 0 GTOP 'outer)
+  (nearer (hit-cyl o d GX GZ GRI GFLOOR GTOP 'inner)
+  (nearer (hit-ring o d GX GZ GRI GR GTOP 'rim)
+  (nearer (hit-ring o d GX GZ 0 GRI WATER 'surface)
+  (nearer (hit-ring o d GX GZ 0 GRI GFLOOR 'floor)
+          (hit-ring o d GX GZ 0 GR 0 'base))))))))
+
+(def hit-candle (fn (o d)
+  (nearer (hit-cyl o d CX CZ CR 0 CTOP 'side)
+          (hit-ring o d CX CZ 0 CR CTOP 'top))))
+
+(def hit (fn (o d)
+  (nearer (hit-glass o d)
+  (nearer (hit-candle o d)
+  (nearer (hit-plane-y o d 0 'table)
+          (hit-plane-z o d WALL-Z 'wall))))))
+
+;; For each glass or water surface: what's on the normal's side, what's behind.
+(def sides (fn (name p)
+  (cond ((eq? name 'outer) (list 'air 'glass))
+        ((eq? name 'inner) (list 'glass (if (< (Y p) WATER) 'water 'air)))
+        ((eq? name 'rim) (list 'air 'glass))
+        ((eq? name 'surface) (list 'air 'water))
+        ((eq? name 'floor) (list 'water 'glass))
+        (else nil))))
+
+;; ---- light arriving at a point straight from the flame ------------------------
+
+;; Is the path from p to the light clear? The candle's own top shades the table
+;; near its foot. The glass doesn't cast a plain shadow: it bends what passes
+;; through, so we treat it as dark here and let the caustic pass (below) put
+;; back the light it actually focuses.
+(def lit (fn (p light)
+  (def to (v- light p))
+  (def dist (len to))
+  (def d (v* to (/ 1 dist)))
+  (def c (hit-candle p d))
+  (def g (hit-glass p d))
+  (and (or (null? c) (> (car c) (- dist 0.001)))
+       (or (null? g) (> (car g) (- dist 0.001))))))
+
+(def direct (fn (p n light)
+  (def to (v- light p))
+  (def d2 (dot to to))
+  (def cosine (/ (dot to n) (sqrt d2)))
+  (if (or (<= cosine 0) (not (lit p light))) 0
+      (/ (* LIGHT-POWER cosine) d2))))
+
+;; ---- the caustic: light the glass focuses onto the table ----------------------
+;; Filled in by caustic.wick (photons sent from the flame through the glass) and
+;; read here as a grid of irradiance over a patch of table.
+
+(def CAU-X0 -0.6) (def CAU-Z0 -1.6) (def CAU-SIZE 2.4) (def CAU-N 240)
+(def caustic-grid
+  (if (and (eq? MODE 'picture) (> (length argv) 6))
+      (begin
+        ;; one line per row of the grid (wick's lists copy on cons, so keep them short)
+        (def g (make-vector (* CAU-N CAU-N) 0))
+        (def load-row (fn (j cells)
+          (def put (fn (i xs)
+            (when (not (null? xs))
+              (vector-set! g (+ (* j CAU-N) i) (string->number (car xs)))
+              (put (+ i 1) (cdr xs)))))
+          (put 0 (filter (fn (c) (> (string-length c) 0)) (string-split cells " ")))))
+        (def load (fn (j lines)
+          (when (and (not (null? lines)) (< j CAU-N))
+            (load-row j (car lines))
+            (load (+ j 1) (cdr lines)))))
+        (load 0 (string-split (read-file (nth 6 argv)) "\n"))
+        g)
+      nil))
+(def caustic (fn (p)
+  (if (null? caustic-grid) 0
+    (begin
+      (def gx (- (* (/ (- (X p) CAU-X0) CAU-SIZE) CAU-N) 0.5))
+      (def gz (- (* (/ (- (Z p) CAU-Z0) CAU-SIZE) CAU-N) 0.5))
+      (if (or (< gx 0) (< gz 0) (>= gx (- CAU-N 1)) (>= gz (- CAU-N 1))) 0
+        (begin
+          (def ix (floor gx)) (def iz (floor gz))
+          (def fx (- gx ix)) (def fz (- gz iz))
+          (def g (fn (i j) (vector-ref caustic-grid (+ (* j CAU-N) i))))
+          (mix (mix (g ix iz) (g (+ ix 1) iz) fx)
+               (mix (g ix (+ iz 1)) (g (+ ix 1) (+ iz 1)) fx) fz)))))))
+
+;; ---- what the opaque things look like ---------------------------------------
+
+(def wood (fn (p)
+  (def x (X p)) (def z (Z p))
+  (def grain (+ (* 0.55 (sin (+ (* x 31) (* 2.2 (sin (* z 2.7))) (* 0.6 (sin (* x 7.3))))))
+                (* 0.25 (sin (+ (* x 87) (* 1.3 (sin (* z 5.1))))))))
+  (v* (v3 0.36 0.19 0.095) (+ 0.82 (* 0.18 grain)))))
+
+(def plaster (v3 0.32 0.27 0.23))
+
+;; varnished wood reflects a little, a lot more at a glancing angle (Schlick)
+(def sheen (fn (d n) (+ 0.03 (* 0.97 (expt (- 1 (abs (dot d n))) 5)))))
+
+(def shade (fn (name p n d light depth)
+  (cond
+    ((eq? name 'table)
+     (def e (+ (direct p n light) (caustic p) 0.004))
+     (def diffuse (vmul (wood p) (v* LIGHT-COLOUR e)))
+     (def k (sheen d n))
+     (if (> depth 1) diffuse
+         (v+ (v* diffuse (- 1 k))
+             (v* (trace p (v3 (X d) (- (Y d)) (Z d)) 'air (+ depth 1) k light) (* 0.8 k)))))
+    ((eq? name 'wall)
+     (vmul plaster (v* LIGHT-COLOUR (+ (direct p n light) 0.003))))
+    ((eq? name 'side)
+     ;; wax is translucent: just under the rim it glows with the flame inside it
+     (def depth-below (- CTOP (Y p)))
+     (def sss (+ (* 0.75 (exp (/ (- depth-below) 0.07))) (* 0.06 (exp (/ (- depth-below) 0.22)))))
+     (def facing (abs (dot d n)))
+     (v+ (v* (v3 1.0 0.50 0.20) (* sss (+ 0.25 (* 0.75 facing))))
+         (v* (v3 0.95 0.70 0.50) 0.012)))
+    ((eq? name 'top)
+     (def r2 (/ (+ (sq (- (X p) CX)) (sq (- (Z p) CZ))) (sq CR)))
+     (def pool (smooth 0.85 0.0 r2))
+     (v+ (v* (v3 1.0 0.58 0.24) (+ 0.30 (* 0.8 pool)))
+         (v* (v3 1.0 0.74 0.45) (* 0.35 (smooth 0.6 0.98 r2)))))
+    (else black))))
+
+;; ---- bending and reflecting -----------------------------------------------------
+
+;; Fresnel: the share of light a smooth surface reflects, from the two
+;; refractive indices and the angle (unpolarised: the mean of s and p).
+(def fresnel (fn (cosi n1 n2)
+  (def sint (* (/ n1 n2) (sqrt (pos (- 1 (* cosi cosi))))))
+  (if (>= sint 1) 1
+    (begin
+      (def cost (sqrt (- 1 (* sint sint))))
+      (def rs (/ (- (* n1 cosi) (* n2 cost)) (+ (* n1 cosi) (* n2 cost))))
+      (def rp (/ (- (* n1 cost) (* n2 cosi)) (+ (* n1 cost) (* n2 cosi))))
+      (* 0.5 (+ (* rs rs) (* rp rp)))))))
+
+(def reflect (fn (d n) (v- d (v* n (* 2 (dot d n))))))
+
+;; Snell's law, as a direction. n faces the incoming ray; eta = n1/n2.
+(def refract (fn (d n eta)
+  (def cosi (- (dot d n)))
+  (def k (- 1 (* eta eta (- 1 (* cosi cosi)))))
+  (if (< k 0) nil
+      (v+ (v* d eta) (v* n (- (* eta cosi) (sqrt k)))))))
+
+(def MAX-DEPTH 9)
+(def MIN-WEIGHT 0.006)
+
+;; The light arriving at o from direction d, for a ray travelling in medium m.
+;; `weight` is how much this ray still matters to the pixel, used only to stop
+;; following rays that can't change the picture.
+(def trace (fn (o d m depth weight light)
+  (def h (hit o d))
+  (def tmax (if (null? h) 30 (car h)))
+  (def haze (if (eq? m 'air) (glow o d tmax) black))
+  ;; does the ray pass through the flame's sheet on the way?
+  (def tf (if (and (eq? m 'air) (> (Z d) 0)) (/ (- CZ (Z o)) (Z d)) -1))
+  (def fp (if (and (> tf EPS) (< tf tmax)) (at o d tf) nil))
+  (def fx (if (null? fp) 0 (- (X fp) CX)))
+  (def fy (if (null? fp) 0 (- (Y fp) CTOP)))
+  (def walpha (if (null? fp) 0 (wick-alpha fx fy)))
+  (def emitted (if (null? fp) black
+                   (v+ (v* (flame fx fy) (- 1 walpha)) (v* (wick-colour fy) walpha))))
+  (def behind
+    (if (or (null? h) (< walpha 0.999))
+      (if (null? h) black
+        (begin
+          (def p (at o d (car h)))
+          (def n (nth 1 h))
+          (def name (nth 2 h))
+          (def s (sides name p))
+          (cond
+            ((eq? name 'base)                       ; looking down through glass to the table
+             (shade 'table p (v3 0 1 0) d light (+ depth 5)))
+            ((null? s) (shade name p n d light depth))
+            ((>= depth MAX-DEPTH) black)
+            (else
+             (def entering (< (dot d n) 0))
+             (def from (if entering (car s) (nth 1 s)))
+             (def to   (if entering (nth 1 s) (car s)))
+             (def nf (if entering n (v* n -1)))     ; normal facing the ray
+             (def cosi (- (dot d nf)))
+             (def F (fresnel cosi (ior from) (ior to)))
+             (def rdir (refract d nf (/ (ior from) (ior to))))
+             (def bounce (if (> (* weight F) MIN-WEIGHT)
+                             (v* (trace p (reflect d nf) from (+ depth 1) (* weight F) light) F)
+                             black))
+             (def through (if (and (not (null? rdir)) (> (* weight (- 1 F)) MIN-WEIGHT))
+                              (v* (trace p (unit rdir) to (+ depth 1) (* weight (- 1 F)) light) (- 1 F))
+                              black))
+             (v+ bounce through)))))
+      black))
+  ;; what the medium soaked up over the distance travelled
+  (def a (absorb m))
+  (def kept (if (null? a) behind
+                (vmul behind (v3 (exp (* -1 (X a) tmax)) (exp (* -1 (Y a) tmax)) (exp (* -1 (Z a) tmax))))))
+  (v+ haze (v+ emitted (v* kept (- 1 walpha))))))
+
+;; ---- the eye ---------------------------------------------------------------------
+
+(def EYE (v3 0.05 1.52 -4.3))
+(def LOOK (v3 0.0 0.82 0.6))
+(def FWD (unit (v- LOOK EYE)))
+(def RIGHT (unit (cross (v3 0 1 0) FWD)))
+(def UP (cross FWD RIGHT))
+(def ZOOM 0.30)
+
+(def tone (fn (v) (expt (- 1 (exp (* -1.35 (pos v)))) (/ 1 2.2))))
+
+(def sample (fn (sx sy light)
+  (def u (* ZOOM (/ (- sx (/ W 2)) (/ H 2))))
+  (def v (* ZOOM (/ (- (/ H 2) sy) (/ H 2))))
+  (trace EYE (unit (v+ FWD (v+ (v* RIGHT u) (v* UP v)))) 'air 0 1 light)))
+
+;; Each of the samples in a pixel also sees the flame from a slightly
+;; different height, so shadows come out soft, the way a tall flame makes them.
+(def OFFS (if (= SPP 1) (list (list 0.5 0.5 0))
+              (list (list 0.25 0.25 -0.09) (list 0.75 0.25 0.03)
+                    (list 0.25 0.75 -0.03) (list 0.75 0.75 0.09))))
+
+(def pixel (fn (px py)
+  ;; each sample's flame height is its own quarter of the flame's height, shifted
+  ;; per pixel, so penumbras come out as fine grain instead of four stacked shadows
+  (def shift (* 0.06 (- (hash (+ px 0.37) (* py 1.91)) 0.5)))
+  (def acc (fold (fn (acc o)
+                    (v+ acc (sample (+ px (car o)) (+ py (nth 1 o))
+                                    (v+ LIGHT (v3 0 (+ (nth 2 o) (if (= SPP 1) 0 shift)) 0)))))
+                  black OFFS))
+  (def c (v* acc (/ 1 (length OFFS))))
+  (def grain (* 0.010 (- (hash px py) 0.5)))
+  (map (fn (v) (clamp (round (* 255 (+ (tone v) grain))) 0 255)) c)))
+
+(when (eq? MODE 'picture)
+(write-file OUT "")
+(def row (fn (py)
+  (def cols (fn (px acc)
+    (if (< px 0) acc
+        (cols (- px 1) (cons (string-join (map number->string (pixel px py)) " ") acc)))))
+  (append-file OUT (string-append (string-join (cols (- W 1) '()) "\n") "\n"))))
+(def rows (fn (py) (when (< py ROW1) (row py) (rows (+ py 1)))))
+(rows ROW0))
+
+;; ---- the caustic pass --------------------------------------------------------------
+;;   ./wick examples/glass.wick caustic N SEED - - OUT
+;; Sends N photons from the flame at the glass, follows each through every
+;; surface it crosses (losing what Fresnel reflects, soaking up what the
+;; glass and water absorb), and adds what lands on the table to a grid.
+;; Photons that miss the glass are already counted by `direct`.
+
+(def splat (fn (grid p power)
+  (def gx (- (* (/ (- (X p) CAU-X0) CAU-SIZE) CAU-N) 0.5))
+  (def gz (- (* (/ (- (Z p) CAU-Z0) CAU-SIZE) CAU-N) 0.5))
+  (def ix (round gx)) (def iz (round gz))
+  (def cell (sq (/ CAU-SIZE CAU-N)))
+  ;; a small tent kernel, so a few hundred thousand photons read as light, not sand
+  (for-each (fn (o)
+              (def i (+ ix (car o))) (def j (+ iz (nth 1 o)))
+              (when (and (>= i 0) (>= j 0) (< i CAU-N) (< j CAU-N))
+                (def k (+ (* j CAU-N) i))
+                (vector-set! grid k (+ (vector-ref grid k) (/ (* power (nth 2 o)) cell)))))
+            (list (list 0 0 0.25) (list 1 0 0.125) (list -1 0 0.125) (list 0 1 0.125) (list 0 -1 0.125)
+                  (list 1 1 0.0625) (list 1 -1 0.0625) (list -1 1 0.0625) (list -1 -1 0.0625)))))
+
+;; Follow one photon. `inside` says whether it has passed through glass yet.
+(def photon (fn (grid o d m power inside n)
+  (when (and (< n 14) (> power 1e-9))
+    (def h (hit o d))
+    (when (not (null? h))
+      (def p (at o d (car h)))
+      (def name (nth 2 h))
+      (def a (absorb m))
+      (def pw (if (null? a) power
+                  (* power (/ (+ (exp (* -1 (X a) (car h))) (exp (* -1 (Y a) (car h))) (exp (* -1 (Z a) (car h)))) 3))))
+      (def s (sides name p))
+      (cond
+        ((or (eq? name 'table) (eq? name 'base)) (when inside (splat grid p pw)))
+        ((null? s) nil)                               ; candle, wall: absorbed
+        (else
+          (def nm (nth 1 h))
+          (def entering (< (dot d nm) 0))
+          (def from (if entering (car s) (nth 1 s)))
+          (def to (if entering (nth 1 s) (car s)))
+          (def nf (if entering nm (v* nm -1)))
+          (def F (fresnel (- (dot d nf)) (ior from) (ior to)))
+          (def r (refract d nf (/ (ior from) (ior to))))
+          ;; take one branch at random, in proportion: Russian roulette keeps it unbiased
+          (if (or (null? r) (< (hash (* n 7.13) (+ (* power 1e7) (X p))) F))
+              (when inside (photon grid p (reflect d nf) from pw #t (+ n 1)))
+              (photon grid p (unit r) to pw #t (+ n 1)))))))))
+
+(when (eq? MODE 'caustic)
+  (def N (arg 1))
+  (def SEED (arg 2))
+  (def grid (make-vector (* CAU-N CAU-N) 0))
+  ;; aim at a sheet through the glass, square to the flame, and spread photons
+  ;; over it evenly (an R2 low-discrepancy sequence)
+  (def toward (unit (v3 (- GX (X LIGHT)) 0 (- GZ (Z LIGHT)))))
+  (def across (v3 (- (Z toward)) 0 (X toward)))
+  (def half (* 1.05 GR))
+  (def area (* 2 half GTOP))
+  (def shoot (fn (i)
+    (when (< i N)
+      (def k (+ i (* SEED N)))
+      (def a (fract (+ 0.5 (* k 0.7548776662))))
+      (def b (fract (+ 0.5 (* k 0.5698402910))))
+      (def c (fract (* k 0.6180339887)))
+      (def light (v+ LIGHT (v3 0 (* 0.18 (- c 0.5)) 0)))      ; a tall flame, not a point
+      (def target (v+ (v3 GX (* b GTOP) GZ) (v* across (* half (- (* 2 a) 1)))))
+      (def to (v- target light))
+      (def r2 (dot to to))
+      (def d (unit to))
+      (def cosine (abs (dot d toward)))
+      ;; this photon's share of the flame's power: intensity × the solid angle it stands for
+      (def power (/ (* LIGHT-POWER cosine (/ area N)) r2))
+      (photon grid light d 'air power #f 0)
+      (shoot (+ i 1)))))
+  (shoot 0)
+  (write-file OUT "")
+  (def write-row (fn (j)
+    (when (< j CAU-N)
+      (def cells (fn (i acc)
+        (if (< i 0) acc
+            (cells (- i 1) (cons (number->string (vector-ref grid (+ (* j CAU-N) i))) acc)))))
+      (append-file OUT (string-append (string-join (cells (- CAU-N 1) '()) " ") "\n"))
+      (write-row (+ j 1)))))
+  (write-row 0))

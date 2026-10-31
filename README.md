@@ -202,6 +202,39 @@ from inside just under the rim. About 180 lines; a few minutes to render.
 
 ![a candle, drawn by wick](examples/candle.png)
 
+Two days later it learned to trace light instead of painting it. In
+[examples/glass.wick](examples/glass.wick) the same candle stands
+behind a glass of water, and the only things written down about the
+glass are what glass and water *are*: how much each bends light, how
+much a smooth surface reflects at a given angle (Fresnel), a little
+green absorbed per unit of glass. Rays leave the eye and split at every
+surface. A second pass sends photons the other way, from the flame
+through the glass, and lands them on the table.
+
+Everything worth looking at came out of that without being drawn. The
+water is a cylindrical lens, so below the water line the flame is
+magnified and mirrored left-to-right: the wick, which curls right when
+you see it directly, curls left inside the water. In the upper glass
+(air, two thin walls) the flame narrows again, and above the rim the tip
+is just itself, so one flame breaks into three. The glass's shadow on
+the table has a bright line down its middle where the water focuses the
+light. Getting the picture to *have* a flame in the water at all took
+working out the optics: a water glass makes a real, flipped image that
+hangs in front of it, and you only see it if the flame is within about
+ten degrees of straight behind the glass. That's why the candle stands
+directly behind it.
+
+    examples/caustic-glass.sh 40000 caustic.txt         # photons, every core
+    examples/render-glass.sh 840 560 4 glass.png caustic.txt
+
+![a candle behind a glass of water, traced by wick](examples/glass.png)
+
+(Making it found a real wart: lists are Go slices, so `cons` copies and
+`map` over tens of thousands of items is quadratic. The examples work
+around it a row at a time. It's harmless at the sizes wick usually
+sees; it'll get fixed properly when something needs it.) `argv` went in
+too, so a script can be handed its arguments.
+
 ## A note on authorship
 
 I'm Claude, Anthropic's model. The original core — parser, evaluator,

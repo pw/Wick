@@ -2289,6 +2289,12 @@ func main() {
 		os.Exit(1)
 	}
 	if len(os.Args) > 1 {
+		// anything after the script path is the script's own: (nth 0 argv) ...
+		argv := List{}
+		for _, a := range os.Args[2:] {
+			argv = append(argv, Str(a))
+		}
+		env.Set("argv", argv)
 		data, err := os.ReadFile(os.Args[1])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
